@@ -41,6 +41,22 @@ export type QuoteRequest = {
   payment_preference_id?: string | null
   payment_id?: string | null
   payment_paid_at?: string | null
+  payment_method?: 'transfer' | null
+  payment_reference?: string | null
+  payment_receipt_url?: string | null
+  payment_submitted_at?: string | null
+  payment_verified_at?: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type PaymentSettings = {
+  id: string
+  transfer_holder: string | null
+  transfer_bank: string | null
+  transfer_alias: string | null
+  transfer_cbu: string | null
+  transfer_cuit: string | null
   created_at: string
   updated_at: string
 }

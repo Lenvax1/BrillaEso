@@ -7,9 +7,11 @@ import { supabase } from '@/lib/supabase'
 import type { GalleryWork } from '@/types'
 import { getPublicStorageUrl } from '@/lib/storage'
 import { GalleryEditorModal } from '@/pages/admin/GalleryEditorModal'
+import { withTimeout } from '@/lib/timeout'
 
 export default function AdminGallery() {
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [items, setItems] = useState<GalleryWork[]>([])
   const [open, setOpen] = useState(false)
   const [workId, setWorkId] = useState<string | null>(null)
@@ -17,14 +19,69 @@ export default function AdminGallery() {
   const load = useMemo(() => {
     return async () => {
       setLoading(true)
-      const { data } = await supabase.from('gallery_works').select('*').order('created_at', { ascending: false }).limit(200)
-      setItems((data as GalleryWork[]) ?? [])
-      setLoading(false)
+      setLoadError(null)
+      try {
+        let attempt = 0
+        while (attempt < 2) {
+          const { data, error } = await withTimeout(
+            supabase.from('gallery_works').select('*').order('created_at', { ascending: false }).limit(200),
+            20_000,
+            'La carga tardó demasiado. Reintentá con Actualizar.'
+          )
+          if (!error) {
+            setItems((data as GalleryWork[]) ?? [])
+            return
+          }
+
+          const msg = String((error as { message?: unknown } | null)?.message ?? '')
+          const looksAuth = msg.toLowerCase().includes('jwt') || msg.toLowerCase().includes('auth')
+          if (looksAuth && attempt === 0) {
+            await supabase.auth.refreshSession().catch(() => null)
+            attempt++
+            continue
+          }
+          throw error
+        }
+      } catch (e) {
+        setItems([])
+        setLoadError(e instanceof Error ? e.message : 'No se pudo cargar')
+      } finally {
+        setLoading(false)
+      }
     }
   }, [])
 
   useEffect(() => {
     void load()
+  }, [load])
+
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void load()
+    }
+    const onOnline = () => void load()
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('online', onOnline)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('online', onOnline)
+    }
+  }, [load])
+
+  useEffect(() => {
+    let t: number | undefined
+    const channel = supabase
+      .channel('admin-gallery-works')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'gallery_works' }, () => {
+        if (t) window.clearTimeout(t)
+        t = window.setTimeout(() => void load(), 300)
+      })
+      .subscribe()
+
+    return () => {
+      if (t) window.clearTimeout(t)
+      void supabase.removeChannel(channel)
+    }
   }, [load])
 
   const openCreate = () => {
@@ -50,15 +107,24 @@ export default function AdminGallery() {
           <div className="text-lg font-semibold text-text-primary">Galería</div>
           <div className="mt-1 text-sm text-text-secondary">Gestioná trabajos e imágenes.</div>
         </div>
-        <Button onClick={openCreate}>
-          <Plus className="h-4 w-4" />
-          Nuevo trabajo
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button size="sm" variant="secondary" onClick={() => void load()} disabled={loading}>
+            Actualizar
+          </Button>
+          <Button onClick={openCreate}>
+            <Plus className="h-4 w-4" />
+            Nuevo trabajo
+          </Button>
+        </div>
       </div>
 
       {loading ? <div className="h-72 animate-pulse rounded-xl border border-white/10 bg-white/5" /> : null}
 
-      {!loading ? (
+      {!loading && loadError ? (
+        <div className="rounded-xl border border-danger/40 bg-danger/10 p-3 text-sm text-danger">{loadError}</div>
+      ) : null}
+
+      {!loading && !loadError ? (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {items.map((w) => (
             <Card key={w.id} className="overflow-hidden">

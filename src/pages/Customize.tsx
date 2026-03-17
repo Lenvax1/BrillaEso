@@ -6,6 +6,7 @@ import { Card } from '@/components/ui/Card'
 import { Input } from '@/components/ui/Input'
 import { Textarea } from '@/components/ui/Textarea'
 import { supabase } from '@/lib/supabase'
+import { withTimeout } from '@/lib/timeout'
 import { useAuthStore } from '@/stores/authStore'
 
 type Specs = {
@@ -24,7 +25,7 @@ export default function Customize() {
   const [file, setFile] = useState<File | null>(null)
   const [preview, setPreview] = useState<string>('')
   const [loading, setLoading] = useState(false)
-  const [step, setStep] = useState<'upload' | 'create' | null>(null)
+  const [step, setStep] = useState<'optimize' | 'upload' | 'create' | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [okId, setOkId] = useState<string | null>(null)
 
@@ -66,17 +67,28 @@ export default function Customize() {
     }
     if (!file) return
     setLoading(true)
-    setStep('upload')
+    setStep('optimize')
     setError(null)
     setOkId(null)
     try {
-      const uploadFile = await compressImageIfNeeded(file)
+      const uploadFile = await withTimeout(
+        compressImageIfNeeded(file),
+        8000,
+        'La imagen es muy pesada. Probá con una más liviana.'
+      )
       const ext = getExt(uploadFile.name)
       const path = `${user.id}/${crypto.randomUUID()}.${ext}`
-      const { error: upErr } = await supabase.storage.from('references').upload(path, uploadFile, {
-        upsert: false,
-        contentType: uploadFile.type,
-      })
+
+      setStep('upload')
+      const uploadRes = await withTimeout(
+        supabase.storage.from('references').upload(path, uploadFile, {
+          upsert: false,
+          contentType: uploadFile.type,
+        }),
+        25000,
+        'La subida está tardando demasiado. Probá con otra imagen o revisá tu conexión.'
+      )
+      const upErr = uploadRes.error
       if (upErr) throw upErr
 
       setStep('create')
@@ -236,16 +248,19 @@ export default function Customize() {
             {loading ? (
               <>
                 <Loader2 className="h-4 w-4 animate-spin" />
-                {step === 'upload' ? 'Subiendo imagen…' : step === 'create' ? 'Creando solicitud…' : 'Enviando…'}
+                {step === 'optimize'
+                  ? 'Optimizando imagen…'
+                  : step === 'upload'
+                    ? 'Subiendo imagen…'
+                    : step === 'create'
+                      ? 'Creando solicitud…'
+                      : 'Enviando…'}
               </>
             ) : (
               'Enviar solicitud'
             )}
           </Button>
 
-          <div className="text-xs text-text-secondary">
-            La previsualización por IA se ejecuta desde el backend y usa calidad fija "mid".
-          </div>
         </div>
       </Card>
     </div>

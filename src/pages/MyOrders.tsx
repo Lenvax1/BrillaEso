@@ -105,8 +105,9 @@ export default function MyOrders() {
                   <div className="col-span-3 text-sm text-text-secondary">{formatDateShort(q.created_at)}</div>
                   <div className="col-span-3">
                     <Badge tone={getStatusTone(q.status)}>{q.status}</Badge>
-                    {q.payment_status === 'paid' ? (
-                      <div className="mt-1 text-xs text-text-secondary">Pagado</div>
+                    {q.payment_status === 'paid' ? <div className="mt-1 text-xs text-text-secondary">Pagado</div> : null}
+                    {q.customer_decision === 'accepted' && q.payment_status !== 'paid' ? (
+                      <div className="mt-1 text-xs text-text-secondary">Pago pendiente</div>
                     ) : null}
                     {q.quoted_price != null ? (
                       <div className="mt-1 text-xs text-text-secondary">{formatMoneyARS(q.quoted_price)}</div>

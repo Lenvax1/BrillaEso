@@ -55,3 +55,32 @@ export default tseslint.config({
   },
 })
 ```
+
+---
+
+## Configuración de la app
+
+### Variables de entorno
+- Crear `.env` basado en `.env.example`
+- Completar:
+  - `VITE_SUPABASE_URL`
+  - `VITE_SUPABASE_ANON_KEY`
+
+### Mercado Pago (Edge Functions)
+Para que funcione el botón **Aceptar y pagar**, se usan Edge Functions.
+
+1) En Supabase Dashboard → **Project Settings** → **Edge Functions** → **Secrets**
+- `MP_ACCESS_TOKEN`: access token de Mercado Pago
+
+2) Deploy de funciones
+Necesitás Supabase CLI autenticado (o `SUPABASE_ACCESS_TOKEN` configurado) y ejecutar:
+
+```bash
+npx -y supabase link --project-ref ypdyadhdyftmudtguhuj
+npx -y supabase functions deploy mp-create-preference
+npx -y supabase functions deploy quote-reject
+npx -y supabase functions deploy mp-webhook
+```
+
+Notas:
+- `mp-webhook` está configurada con `verify_jwt = false` porque Mercado Pago no envía JWT.
