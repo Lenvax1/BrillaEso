@@ -11,7 +11,7 @@ import { useAuthStore } from '@/stores/authStore'
 
 type Specs = {
   measures: { widthCm: number; heightCm: number }
-  style: { colors: string; background: 'transparent' | 'dark' | 'light' }
+  style: { colors: string; background: 'transparent' | 'dark' | 'light' | 'none' }
   text: string
   notes: string
 }
@@ -34,7 +34,7 @@ export default function Customize() {
   const [widthCm, setWidthCm] = useState(60)
   const [heightCm, setHeightCm] = useState(40)
   const [colors, setColors] = useState('verde, morado')
-  const [background, setBackground] = useState<'transparent' | 'dark' | 'light'>('dark')
+  const [background, setBackground] = useState<'transparent' | 'dark' | 'light' | 'none'>('dark')
   const [text, setText] = useState('')
   const [notes, setNotes] = useState('')
 

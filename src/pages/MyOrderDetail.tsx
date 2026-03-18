@@ -25,6 +25,7 @@ export default function MyOrderDetail() {
   const [error, setError] = useState<string | null>(null)
   const [q, setQ] = useState<(QuoteRequest & { orders?: Order[] }) | null>(null)
   const [imgUrl, setImgUrl] = useState<string>('')
+  const [previewImgUrl, setPreviewImgUrl] = useState<string>('')
   const [busy, setBusy] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
   const [pay, setPay] = useState<PaymentSettings | null>(null)
@@ -79,6 +80,21 @@ export default function MyOrderDetail() {
           setImgUrl(signed)
         } catch {
           setImgUrl('')
+        }
+
+        if (qr.preview_image_url) {
+          try {
+            const signedPreview = await withTimeout(
+              getSignedStorageUrl('previews', qr.preview_image_url),
+              20_000,
+              'No se pudo cargar la imagen de aproximación a tiempo.'
+            )
+            setPreviewImgUrl(signedPreview)
+          } catch {
+            setPreviewImgUrl('')
+          }
+        } else {
+          setPreviewImgUrl('')
         }
 
         const { data: ps } = await withTimeout(
@@ -197,13 +213,26 @@ export default function MyOrderDetail() {
 
   return (
     <div className="grid gap-6 lg:grid-cols-2 lg:items-start">
-      <Card className="overflow-hidden">
-        {imgUrl ? (
-          <img src={imgUrl} alt="Referencia" className="w-full object-cover" />
-        ) : (
-          <div className="aspect-[4/3] w-full bg-white/5" />
-        )}
-      </Card>
+      <div className="grid gap-4">
+        {previewImgUrl ? (
+          <Card className="overflow-hidden">
+            <div className="border-b border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-text-primary">
+              Diseño de aproximación
+            </div>
+            <img src={previewImgUrl} alt="Aproximación" className="w-full object-cover" />
+          </Card>
+        ) : null}
+        <Card className="overflow-hidden">
+          <div className="border-b border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-text-primary">
+            Imagen de referencia original
+          </div>
+          {imgUrl ? (
+            <img src={imgUrl} alt="Referencia" className="w-full object-cover" />
+          ) : (
+            <div className="aspect-[4/3] w-full bg-white/5" />
+          )}
+        </Card>
+      </div>
       <div className="grid gap-4">
         <Card className="p-5">
           <div className="flex items-start justify-between gap-3">
@@ -287,11 +316,15 @@ export default function MyOrderDetail() {
                 </div>
               ) : (
                 <div className="rounded-xl border border-white/10 bg-white/5 p-4">
-                  <div className="text-sm font-semibold text-text-primary">Decisión del presupuesto</div>
-                  <div className="mt-1 text-sm text-text-secondary">Aceptá para pagar y comenzar la producción, o rechazá si querés cambiar algo.</div>
+                  <div className="text-sm font-semibold text-text-primary">Decisión del presupuesto y diseño</div>
+                  <div className="mt-1 text-sm text-text-secondary">
+                    {previewImgUrl
+                      ? 'Aceptá para confirmar el diseño de aproximación y el presupuesto.'
+                      : 'Aceptá para pagar y comenzar la producción, o rechazá si querés cambiar algo.'}
+                  </div>
                   <div className="mt-3 flex flex-wrap gap-2">
                     <Button onClick={() => void acceptQuote()} disabled={busy}>
-                      {busy ? 'Aceptando…' : 'Aceptar'}
+                      {busy ? 'Aceptando…' : 'Aceptar diseño y presupuesto'}
                     </Button>
                     <Button variant="secondary" onClick={() => void rejectQuote()} disabled={busy}>
                       Rechazar

@@ -28,6 +28,8 @@ function ModalContent({ detail }: { detail: QuoteRequest | null }) {
   const [busy, setBusy] = useState(false)
   const [hasOrder, setHasOrder] = useState(false)
   const [detailImg, setDetailImg] = useState<string>('')
+  const [previewImgFile, setPreviewImgFile] = useState<File | null>(null)
+  const [previewImgUrl, setPreviewImgUrl] = useState<string>('')
 
   const specs = detail ? parseSpecs(detail.specs_json) : null
   const transferData = parseTransferReference(detail?.payment_reference ?? null)
@@ -39,12 +41,16 @@ function ModalContent({ detail }: { detail: QuoteRequest | null }) {
       setPrice('')
       setStatus('En revisión')
       setNote('')
+      setPreviewImgFile(null)
+      setPreviewImgUrl('')
       return
     }
 
     setPrice(detail.quoted_price != null ? String(detail.quoted_price) : '')
     setStatus(detail.status ?? 'En revisión')
     setNote('')
+    setPreviewImgFile(null)
+    setPreviewImgUrl('')
 
     if (detail.reference_image_url) {
       void (async () => {
@@ -57,6 +63,17 @@ function ModalContent({ detail }: { detail: QuoteRequest | null }) {
       })()
     } else {
       setDetailImg('')
+    }
+
+    if (detail.preview_image_url) {
+      void (async () => {
+        try {
+          const signed = await getSignedStorageUrl('previews', detail.preview_image_url)
+          setPreviewImgUrl(signed)
+        } catch {
+          setPreviewImgUrl('')
+        }
+      })()
     }
 
     void (async () => {
@@ -73,9 +90,22 @@ function ModalContent({ detail }: { detail: QuoteRequest | null }) {
   const save = async () => {
     setBusy(true)
     const numeric = price.trim() ? Number(price) : null
+    
+    let previewUrl = detail.preview_image_url
+    if (previewImgFile) {
+      const fileExt = previewImgFile.name.split('.').pop()
+      const newPath = `${detail.user_id}/${detail.id}.${fileExt}`
+      const { error } = await supabase.storage.from('previews').upload(newPath, previewImgFile, { upsert: true })
+      if (error) {
+        console.error(error)
+      } else {
+        previewUrl = newPath
+      }
+    }
+
     const nextStatus = detail.status === QUOTE_STATUS_ALLOWED ? QUOTE_STATUS_ALLOWED : status === QUOTE_STATUS_ALLOWED ? QUOTE_STATUS_ALLOWED : detail.status
     
-    await supabase.from('quote_requests').update({ quoted_price: numeric, status: nextStatus }).eq('id', detail.id)
+    await supabase.from('quote_requests').update({ quoted_price: numeric, status: nextStatus, preview_image_url: previewUrl }).eq('id', detail.id)
     
     if (note.trim()) {
       await supabase.from('notifications').insert({
@@ -104,6 +134,7 @@ function ModalContent({ detail }: { detail: QuoteRequest | null }) {
       quote_request_id: detail.id,
       status: 'Creado',
       total_amount: numeric,
+      image_url: detail.preview_image_url || detail.reference_image_url,
     })
     await supabase.from('notifications').insert({
       user_id: detail.user_id,
@@ -137,6 +168,11 @@ function ModalContent({ detail }: { detail: QuoteRequest | null }) {
           <div className="text-sm font-semibold text-text-primary">{detail.contact_email}</div>
           <div className="mt-1 text-sm text-text-secondary">{detail.contact_phone}</div>
           <div className="mt-1 text-sm text-text-secondary">ID {detail.id}</div>
+          <div className="mt-3">
+            <div className="mb-2 text-xs text-text-secondary">Imagen de aproximación</div>
+            {previewImgUrl ? <img src={previewImgUrl} alt="Aproximación" className="mb-2 w-full rounded-lg object-cover" /> : null}
+            <Input type="file" accept="image/*" onChange={(e) => setPreviewImgFile(e.target.files?.[0] ?? null)} />
+          </div>
           <div className="mt-3">
             <div className="mb-2 text-xs text-text-secondary">Precio (ARS)</div>
             <Input value={price} onChange={(e) => setPrice(e.target.value)} placeholder="Ej: 45000" />

@@ -45,6 +45,7 @@ export type QuoteRequest = {
   payment_reference?: string | null
   payment_submitted_at?: string | null
   payment_verified_at?: string | null
+  preview_image_url?: string | null
   created_at: string
   updated_at: string
 }
@@ -67,6 +68,7 @@ export type Order = {
   status: string
   total_amount: number | null
   shipping_json: string | null
+  image_url?: string | null
   created_at: string
   updated_at: string
   quote_requests: {
