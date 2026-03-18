@@ -6,6 +6,7 @@ import { Card } from '@/components/ui/Card'
 import { GalleryCard } from '@/components/gallery/GalleryCard'
 import { supabase } from '@/lib/supabase'
 import type { GalleryWork } from '@/types'
+import { withTimeout } from '@/lib/timeout'
 
 export default function Home() {
   const [loading, setLoading] = useState(true)
@@ -17,21 +18,32 @@ export default function Home() {
     ;(async () => {
       setLoading(true)
       setError(null)
-      const { data, error } = await supabase
-        .from('gallery_works')
-        .select('*')
-        .eq('is_published', true)
-        .order('is_featured', { ascending: false })
-        .order('created_at', { ascending: false })
-        .limit(60)
-      if (!alive) return
-      if (error) {
-        setError(error.message)
+      try {
+        const { data, error } = await withTimeout(
+          supabase
+            .from('gallery_works')
+            .select('*')
+            .eq('is_published', true)
+            .order('is_featured', { ascending: false })
+            .order('created_at', { ascending: false })
+            .limit(60),
+          20_000,
+          'La galería está tardando demasiado en cargar. Reintentá.'
+        )
+        if (!alive) return
+        if (error) {
+          setError(error.message)
+          setWorks([])
+        } else {
+          setWorks((data as GalleryWork[]) ?? [])
+        }
+      } catch (e) {
+        if (!alive) return
+        setError(e instanceof Error ? e.message : 'No se pudo cargar la galería')
         setWorks([])
-      } else {
-        setWorks((data as GalleryWork[]) ?? [])
+      } finally {
+        if (alive) setLoading(false)
       }
-      setLoading(false)
     })()
     return () => {
       alive = false

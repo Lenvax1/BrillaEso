@@ -13,6 +13,245 @@ import { getSignedStorageUrl } from '@/lib/storage'
 import { withTimeout } from '@/lib/timeout'
 
 const QUOTE_STATUS_ALLOWED = 'Cotizado'
+type ParsedSpecs = {
+  measures?: { widthCm?: number; heightCm?: number }
+  style?: { colors?: string; background?: string }
+  text?: string
+  notes?: string
+  rest: Array<{ key: string; value: string }>
+}
+
+function ModalContent({ detail }: { detail: QuoteRequest | null }) {
+  const [status, setStatus] = useState<string>('En revisión')
+  const [price, setPrice] = useState<string>('')
+  const [note, setNote] = useState<string>('')
+  const [busy, setBusy] = useState(false)
+  const [hasOrder, setHasOrder] = useState(false)
+  const [detailImg, setDetailImg] = useState<string>('')
+
+  const specs = detail ? parseSpecs(detail.specs_json) : null
+  const transferData = parseTransferReference(detail?.payment_reference ?? null)
+
+  useEffect(() => {
+    if (!detail) {
+      setDetailImg('')
+      setHasOrder(false)
+      setPrice('')
+      setStatus('En revisión')
+      setNote('')
+      return
+    }
+
+    setPrice(detail.quoted_price != null ? String(detail.quoted_price) : '')
+    setStatus(detail.status ?? 'En revisión')
+    setNote('')
+
+    if (detail.reference_image_url) {
+      void (async () => {
+        try {
+          const signed = await getSignedStorageUrl('references', detail.reference_image_url)
+          setDetailImg(signed)
+        } catch {
+          setDetailImg('')
+        }
+      })()
+    } else {
+      setDetailImg('')
+    }
+
+    void (async () => {
+      const { count } = await supabase
+        .from('orders')
+        .select('id', { count: 'exact', head: true })
+        .eq('quote_request_id', detail.id)
+      setHasOrder((count ?? 0) > 0)
+    })()
+  }, [detail])
+
+  if (!detail) return <div className="p-4 text-sm text-text-secondary">Cargando...</div>
+
+  const save = async () => {
+    setBusy(true)
+    const numeric = price.trim() ? Number(price) : null
+    const nextStatus = detail.status === QUOTE_STATUS_ALLOWED ? QUOTE_STATUS_ALLOWED : status === QUOTE_STATUS_ALLOWED ? QUOTE_STATUS_ALLOWED : detail.status
+    
+    await supabase.from('quote_requests').update({ quoted_price: numeric, status: nextStatus }).eq('id', detail.id)
+    
+    if (note.trim()) {
+      await supabase.from('notifications').insert({
+        user_id: detail.user_id,
+        title: `Actualización de solicitud ${detail.id.slice(0, 8)}`,
+        body: note.trim(),
+        link_url: `/mis-pedidos/${detail.id}`,
+      })
+    } else {
+      await supabase.from('notifications').insert({
+        user_id: detail.user_id,
+        title: `Solicitud ${detail.id.slice(0, 8)}: ${status}`,
+        body: numeric != null ? `Presupuesto: ${formatMoneyARS(numeric)}` : `Estado actualizado: ${status}`,
+        link_url: `/mis-pedidos/${detail.id}`,
+      })
+    }
+    setBusy(false)
+  }
+
+  const createOrder = async () => {
+    if (!detail.user_id) return
+    const numeric = price.trim() ? Number(price) : null
+    setBusy(true)
+    await supabase.from('orders').insert({
+      user_id: detail.user_id,
+      quote_request_id: detail.id,
+      status: 'Creado',
+      total_amount: numeric,
+    })
+    await supabase.from('notifications').insert({
+      user_id: detail.user_id,
+      title: `Pedido creado desde ${detail.id.slice(0, 8)}`,
+      body: numeric != null ? `Total: ${formatMoneyARS(numeric)}` : 'Tu pedido ya está en proceso.',
+      link_url: `/mis-pedidos/${detail.id}`,
+    })
+    setBusy(false)
+    setHasOrder(true)
+  }
+
+  const markPaid = async () => {
+    setBusy(true)
+    await supabase.rpc('admin_mark_transfer_paid', { p_quote_request_id: detail.id })
+    await supabase.from('notifications').insert({
+      user_id: detail.user_id,
+      title: `Pago verificado ${detail.id.slice(0, 8)}`,
+      body: 'Verificamos tu transferencia. Continuamos con la producción.',
+      link_url: `/mis-pedidos/${detail.id}`,
+    })
+    setBusy(false)
+  }
+
+  return (
+    <div className="grid gap-4">
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card className="overflow-hidden">
+          {detailImg ? <img src={detailImg} alt="Referencia" className="w-full object-cover" /> : <div className="aspect-[4/3] bg-white/5" />}
+        </Card>
+        <Card className="p-4">
+          <div className="text-sm font-semibold text-text-primary">{detail.contact_email}</div>
+          <div className="mt-1 text-sm text-text-secondary">{detail.contact_phone}</div>
+          <div className="mt-1 text-sm text-text-secondary">ID {detail.id}</div>
+          <div className="mt-3">
+            <div className="mb-2 text-xs text-text-secondary">Precio (ARS)</div>
+            <Input value={price} onChange={(e) => setPrice(e.target.value)} placeholder="Ej: 45000" />
+          </div>
+          <div className="mt-3">
+            <div className="mb-2 text-xs text-text-secondary">Estado</div>
+            <div className="rounded-xl border border-white/10 bg-white/5 p-3 text-sm text-text-secondary">
+              Desde esta pantalla solo se puede marcar como <span className="text-text-primary">{QUOTE_STATUS_ALLOWED}</span>.
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <Badge tone={getStatusTone(detail.status)}>{detail.status}</Badge>
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={busy || detail.status === QUOTE_STATUS_ALLOWED}
+                onClick={() => setStatus(QUOTE_STATUS_ALLOWED)}
+              >
+                Marcar como {QUOTE_STATUS_ALLOWED}
+              </Button>
+            </div>
+          </div>
+
+          {detail.customer_decision === 'accepted' ? (
+            <div className="mt-4 rounded-xl border border-white/10 bg-white/5 p-3">
+              <div className="text-xs text-text-secondary">Pago por transferencia</div>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <Badge tone={detail.payment_status === 'paid' ? 'green' : 'purple'}>
+                  {detail.payment_status === 'paid' ? 'Pagado' : 'Pendiente'}
+                </Badge>
+                {transferData.holder ? <span className="text-sm text-text-primary">Titular: {transferData.holder}</span> : null}
+                {transferData.last4 ? <span className="text-sm text-text-secondary">Op. ****{transferData.last4}</span> : null}
+              </div>
+              {!transferData.holder ? <div className="mt-2 text-xs text-text-secondary">El cliente aún no informó los datos de transferencia.</div> : null}
+              <div className="mt-3">
+                <Button size="sm" onClick={() => void markPaid()} disabled={busy || detail.payment_status === 'paid'}>
+                  {detail.payment_status === 'paid' ? 'Pago ya verificado' : 'Marcar como pagado'}
+                </Button>
+              </div>
+            </div>
+          ) : null}
+        </Card>
+      </div>
+      <Card className="p-4">
+        <div className="text-sm font-semibold text-text-primary">Requisitos</div>
+        {specs ? (
+          <div className="mt-3 grid gap-3">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+                <div className="text-xs text-text-secondary">Medidas</div>
+                <div className="mt-2 text-sm text-text-primary">
+                  {specs.measures?.widthCm ?? '-'} cm × {specs.measures?.heightCm ?? '-'} cm
+                </div>
+              </div>
+              <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+                <div className="text-xs text-text-secondary">Fondo</div>
+                <div className="mt-2 text-sm text-text-primary">{prettyBackground(specs.style?.background)}</div>
+              </div>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+              <div className="text-xs text-text-secondary">Colores / estilo</div>
+              <div className="mt-2 text-sm text-text-primary">{specs.style?.colors || '-'}</div>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+                <div className="text-xs text-text-secondary">Texto</div>
+                <div className="mt-2 text-sm text-text-primary">{specs.text || '-'}</div>
+              </div>
+              <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+                <div className="text-xs text-text-secondary">Notas</div>
+                <div className="mt-2 text-sm text-text-primary whitespace-pre-wrap">{specs.notes || '-'}</div>
+              </div>
+            </div>
+            {specs.rest.length ? (
+              <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+                <div className="text-xs text-text-secondary">Otros datos</div>
+                <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                  {specs.rest.map((item) => (
+                    <div key={item.key} className="rounded-lg border border-white/10 bg-white/5 px-3 py-2">
+                      <div className="text-[11px] uppercase tracking-wide text-text-secondary">{item.key}</div>
+                      <div className="mt-1 text-sm text-text-primary break-words">{item.value}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        ) : (
+          <div className="mt-3 rounded-xl border border-white/10 bg-black/30 p-3 text-xs text-text-secondary">
+            {safePrettyJson(detail.specs_json)}
+          </div>
+        )}
+      </Card>
+      <Card className="p-4">
+        <div className="text-sm font-semibold text-text-primary">Mensaje al cliente</div>
+        <div className="mt-2 text-sm text-text-secondary">Esto crea una notificación in-app.</div>
+        <div className="mt-3">
+          <Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Ej: Te paso el presupuesto. Si querés ajustar medidas avisame." />
+        </div>
+      </Card>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <Link to={`/mis-pedidos/${detail.id}`} className="text-sm">
+          Abrir como cliente
+        </Link>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Button variant="secondary" onClick={() => void createOrder()} disabled={busy || hasOrder}>
+            {hasOrder ? 'Pedido ya creado' : 'Crear pedido'}
+          </Button>
+          <Button onClick={() => void save()} disabled={busy}>
+            Guardar y notificar
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 export default function AdminQuotes() {
   const [loading, setLoading] = useState(true)
@@ -21,13 +260,6 @@ export default function AdminQuotes() {
   const [query, setQuery] = useState('')
   const [openId, setOpenId] = useState<string | null>(null)
   const [detail, setDetail] = useState<QuoteRequest | null>(null)
-  const [detailImg, setDetailImg] = useState<string>('')
-  const [receiptUrl, setReceiptUrl] = useState<string>('')
-  const [price, setPrice] = useState<string>('')
-  const [status, setStatus] = useState<string>('En revisión')
-  const [note, setNote] = useState<string>('')
-  const [busy, setBusy] = useState(false)
-  const [hasOrder, setHasOrder] = useState(false)
 
   const load = useMemo(() => {
     return async () => {
@@ -35,7 +267,7 @@ export default function AdminQuotes() {
       setLoadError(null)
       try {
         let attempt = 0
-        while (attempt < 2) {
+        while (attempt < 3) {
           const { data, error } = await withTimeout(
             supabase.from('quote_requests').select('*').order('created_at', { ascending: false }).limit(200),
             20_000,
@@ -53,10 +285,14 @@ export default function AdminQuotes() {
             attempt++
             continue
           }
+          if (attempt < 2) {
+            await new Promise((resolve) => window.setTimeout(resolve, 700))
+            attempt++
+            continue
+          }
           throw error
         }
       } catch (e) {
-        setItems([])
         setLoadError(e instanceof Error ? e.message : 'No se pudo cargar')
       } finally {
         setLoading(false)
@@ -106,49 +342,10 @@ export default function AdminQuotes() {
   useEffect(() => {
     if (!openId) {
       setDetail(null)
-      setDetailImg('')
-      setReceiptUrl('')
-      setHasOrder(false)
       return
     }
     const found = items.find((x) => x.id === openId) ?? null
     setDetail(found)
-    setPrice(found?.quoted_price != null ? String(found.quoted_price) : '')
-    setStatus(found?.status ?? 'En revisión')
-    setNote('')
-    if (found?.reference_image_url) {
-      void (async () => {
-        try {
-          const signed = await getSignedStorageUrl('references', found.reference_image_url)
-          setDetailImg(signed)
-        } catch {
-          setDetailImg('')
-        }
-      })()
-    }
-
-    if (found?.payment_receipt_url) {
-      void (async () => {
-        try {
-          const signed = await getSignedStorageUrl('receipts', found.payment_receipt_url)
-          setReceiptUrl(signed)
-        } catch {
-          setReceiptUrl('')
-        }
-      })()
-    } else {
-      setReceiptUrl('')
-    }
-
-    if (found?.id) {
-      void (async () => {
-        const { count } = await supabase
-          .from('orders')
-          .select('id', { count: 'exact', head: true })
-          .eq('quote_request_id', found.id)
-        setHasOrder((count ?? 0) > 0)
-      })()
-    }
   }, [openId, items])
 
   const filtered = items.filter((x) => {
@@ -156,72 +353,6 @@ export default function AdminQuotes() {
     const q = query.toLowerCase()
     return x.id.toLowerCase().includes(q) || x.contact_email.toLowerCase().includes(q)
   })
-
-  const save = async () => {
-    if (!detail) return
-    setBusy(true)
-    const numeric = price.trim() ? Number(price) : null
-
-    const nextStatus = detail.status === QUOTE_STATUS_ALLOWED ? QUOTE_STATUS_ALLOWED : status === QUOTE_STATUS_ALLOWED ? QUOTE_STATUS_ALLOWED : detail.status
-    await supabase
-      .from('quote_requests')
-      .update({ quoted_price: numeric, status: nextStatus })
-      .eq('id', detail.id)
-    if (note.trim()) {
-      await supabase.from('notifications').insert({
-        user_id: detail.user_id,
-        title: `Actualización de solicitud ${detail.id.slice(0, 8)}`,
-        body: note.trim(),
-        link_url: `/mis-pedidos/${detail.id}`,
-      })
-    } else {
-      await supabase.from('notifications').insert({
-        user_id: detail.user_id,
-        title: `Solicitud ${detail.id.slice(0, 8)}: ${status}`,
-        body: numeric != null ? `Presupuesto: ${formatMoneyARS(numeric)}` : `Estado actualizado: ${status}`,
-        link_url: `/mis-pedidos/${detail.id}`,
-      })
-    }
-    await load()
-    setBusy(false)
-    setOpenId(null)
-  }
-
-  const createOrder = async () => {
-    if (!detail) return
-    if (!detail.user_id) return
-    const numeric = price.trim() ? Number(price) : null
-    setBusy(true)
-    await supabase.from('orders').insert({
-      user_id: detail.user_id,
-      quote_request_id: detail.id,
-      status: 'Creado',
-      total_amount: numeric,
-    })
-    await supabase.from('notifications').insert({
-      user_id: detail.user_id,
-      title: `Pedido creado desde ${detail.id.slice(0, 8)}`,
-      body: numeric != null ? `Total: ${formatMoneyARS(numeric)}` : 'Tu pedido ya está en proceso.',
-      link_url: `/mis-pedidos/${detail.id}`,
-    })
-    await load()
-    setBusy(false)
-    setHasOrder(true)
-  }
-
-  const markPaid = async () => {
-    if (!detail) return
-    setBusy(true)
-    await supabase.rpc('admin_mark_transfer_paid', { p_quote_request_id: detail.id })
-    await supabase.from('notifications').insert({
-      user_id: detail.user_id,
-      title: `Pago verificado ${detail.id.slice(0, 8)}`,
-      body: 'Verificamos tu transferencia. Continuamos con la producción.',
-      link_url: `/mis-pedidos/${detail.id}`,
-    })
-    await load()
-    setBusy(false)
-  }
 
   return (
     <div className="grid gap-6">
@@ -241,17 +372,18 @@ export default function AdminQuotes() {
         </div>
       </div>
 
-      {loading ? <div className="h-72 animate-pulse rounded-xl border border-white/10 bg-white/5" /> : null}
+      {loading && items.length === 0 ? <div className="h-72 animate-pulse rounded-xl border border-white/10 bg-white/5" /> : null}
+      {loading && items.length > 0 ? <div className="text-xs text-text-secondary">Actualizando cotizaciones…</div> : null}
 
       {!loading && loadError ? (
         <div className="rounded-xl border border-danger/40 bg-danger/10 p-3 text-sm text-danger">{loadError}</div>
       ) : null}
 
-      {!loading && !loadError ? (
+      {!loadError && (!loading || items.length > 0) ? (
         <Card className="overflow-hidden">
           <div className="grid grid-cols-12 gap-2 border-b border-white/10 bg-white/5 px-4 py-3 text-xs text-text-secondary">
             <div className="col-span-2">ID</div>
-            <div className="col-span-3">Email</div>
+            <div className="col-span-3">Contacto</div>
             <div className="col-span-2">Fecha</div>
             <div className="col-span-3">Estado</div>
             <div className="col-span-2 text-right">Acción</div>
@@ -263,7 +395,10 @@ export default function AdminQuotes() {
               filtered.map((q) => (
                 <div key={q.id} className="grid grid-cols-12 items-center gap-2 border-b border-white/5 px-4 py-3">
                   <div className="col-span-2 text-sm text-text-primary">{q.id.slice(0, 8)}</div>
-                  <div className="col-span-3 text-sm text-text-secondary">{q.contact_email}</div>
+                  <div className="col-span-3 text-sm text-text-secondary">
+                    <div>{q.contact_email}</div>
+                    <div className="text-text-secondary/80">{q.contact_phone}</div>
+                  </div>
                   <div className="col-span-2 text-sm text-text-secondary">{formatDateShort(q.created_at)}</div>
                   <div className="col-span-3">
                     <Badge tone={getStatusTone(q.status)}>{q.status}</Badge>
@@ -284,89 +419,7 @@ export default function AdminQuotes() {
       ) : null}
 
       <Modal open={!!openId} title="Detalle de cotización" onClose={() => setOpenId(null)}>
-        {detail ? (
-          <div className="grid gap-4">
-            <div className="grid gap-4 lg:grid-cols-2">
-              <Card className="overflow-hidden">
-                {detailImg ? <img src={detailImg} alt="Referencia" className="w-full object-cover" /> : <div className="aspect-[4/3] bg-white/5" />}
-              </Card>
-              <Card className="p-4">
-                <div className="text-sm font-semibold text-text-primary">{detail.contact_email}</div>
-                <div className="mt-1 text-sm text-text-secondary">ID {detail.id}</div>
-                <div className="mt-3">
-                  <div className="mb-2 text-xs text-text-secondary">Precio (ARS)</div>
-                  <Input value={price} onChange={(e) => setPrice(e.target.value)} placeholder="Ej: 45000" />
-                </div>
-                <div className="mt-3">
-                  <div className="mb-2 text-xs text-text-secondary">Estado</div>
-                  <div className="rounded-xl border border-white/10 bg-white/5 p-3 text-sm text-text-secondary">
-                    Desde esta pantalla solo se puede marcar como <span className="text-text-primary">{QUOTE_STATUS_ALLOWED}</span>.
-                  </div>
-                  <div className="mt-3 flex flex-wrap items-center gap-2">
-                    <Badge tone={getStatusTone(detail.status)}>{detail.status}</Badge>
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      disabled={busy || detail.status === QUOTE_STATUS_ALLOWED}
-                      onClick={() => setStatus(QUOTE_STATUS_ALLOWED)}
-                    >
-                      Marcar como {QUOTE_STATUS_ALLOWED}
-                    </Button>
-                  </div>
-                </div>
-
-                {detail.customer_decision === 'accepted' ? (
-                  <div className="mt-4 rounded-xl border border-white/10 bg-white/5 p-3">
-                    <div className="text-xs text-text-secondary">Pago por transferencia</div>
-                    <div className="mt-2 flex flex-wrap items-center gap-2">
-                      <Badge tone={detail.payment_status === 'paid' ? 'green' : 'purple'}>
-                        {detail.payment_status === 'paid' ? 'Pagado' : 'Pendiente'}
-                      </Badge>
-                      {receiptUrl ? (
-                        <a className="text-sm text-neon-green" href={receiptUrl} target="_blank" rel="noreferrer">
-                          Ver comprobante
-                        </a>
-                      ) : (
-                        <span className="text-sm text-text-secondary">Sin comprobante</span>
-                      )}
-                    </div>
-                    <div className="mt-3">
-                      <Button size="sm" onClick={() => void markPaid()} disabled={busy || detail.payment_status === 'paid'}>
-                        {detail.payment_status === 'paid' ? 'Pago ya verificado' : 'Marcar como pagado'}
-                      </Button>
-                    </div>
-                  </div>
-                ) : null}
-              </Card>
-            </div>
-            <Card className="p-4">
-              <div className="text-sm font-semibold text-text-primary">Requisitos</div>
-              <pre className="mt-3 overflow-auto rounded-xl border border-white/10 bg-black/30 p-3 text-xs text-text-secondary">
-                {safePrettyJson(detail.specs_json)}
-              </pre>
-            </Card>
-            <Card className="p-4">
-              <div className="text-sm font-semibold text-text-primary">Mensaje al cliente</div>
-              <div className="mt-2 text-sm text-text-secondary">Esto crea una notificación in-app.</div>
-              <div className="mt-3">
-                <Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Ej: Te paso el presupuesto. Si querés ajustar medidas avisame." />
-              </div>
-            </Card>
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <Link to={`/mis-pedidos/${detail.id}`} className="text-sm">
-                Abrir como cliente
-              </Link>
-              <div className="flex flex-col gap-2 sm:flex-row">
-                <Button variant="secondary" onClick={() => void createOrder()} disabled={busy || hasOrder}>
-                  {hasOrder ? 'Pedido ya creado' : 'Crear pedido'}
-                </Button>
-                <Button onClick={() => void save()} disabled={busy}>
-                  Guardar y notificar
-                </Button>
-              </div>
-            </div>
-          </div>
-        ) : null}
+        <ModalContent detail={detail} />
       </Modal>
     </div>
   )
@@ -377,5 +430,57 @@ function safePrettyJson(specs: string) {
     return JSON.stringify(JSON.parse(specs), null, 2)
   } catch {
     return specs
+  }
+}
+
+function prettyBackground(value?: string) {
+  if (!value) return '-'
+  if (value === 'dark') return 'Oscuro'
+  if (value === 'light') return 'Claro'
+  if (value === 'transparent') return 'Transparente'
+  return value
+}
+
+function parseSpecs(specsJson: string): ParsedSpecs | null {
+  try {
+    const parsed = JSON.parse(specsJson) as Record<string, unknown>
+    const known = new Set(['measures', 'style', 'text', 'notes'])
+    const rest = Object.entries(parsed)
+      .filter(([k]) => !known.has(k))
+      .map(([key, value]) => ({
+        key,
+        value: typeof value === 'string' ? value : JSON.stringify(value),
+      }))
+
+    const measuresRaw = (parsed.measures ?? null) as Record<string, unknown> | null
+    const styleRaw = (parsed.style ?? null) as Record<string, unknown> | null
+    return {
+      measures: {
+        widthCm: typeof measuresRaw?.widthCm === 'number' ? measuresRaw.widthCm : undefined,
+        heightCm: typeof measuresRaw?.heightCm === 'number' ? measuresRaw.heightCm : undefined,
+      },
+      style: {
+        colors: typeof styleRaw?.colors === 'string' ? styleRaw.colors : undefined,
+        background: typeof styleRaw?.background === 'string' ? styleRaw.background : undefined,
+      },
+      text: typeof parsed.text === 'string' ? parsed.text : '',
+      notes: typeof parsed.notes === 'string' ? parsed.notes : '',
+      rest,
+    }
+  } catch {
+    return null
+  }
+}
+
+function parseTransferReference(reference: string | null): { holder: string; last4: string } {
+  if (!reference) return { holder: '', last4: '' }
+  try {
+    const parsed = JSON.parse(reference) as { holder?: unknown; last4?: unknown }
+    return {
+      holder: typeof parsed.holder === 'string' ? parsed.holder : '',
+      last4: typeof parsed.last4 === 'string' ? parsed.last4 : '',
+    }
+  } catch {
+    return { holder: reference, last4: '' }
   }
 }

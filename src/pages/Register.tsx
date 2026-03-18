@@ -5,6 +5,8 @@ import { Input } from '@/components/ui/Input'
 import { Button } from '@/components/ui/Button'
 import { useAuthStore } from '@/stores/authStore'
 
+import { GoogleIcon } from '@/components/ui/GoogleIcon'
+
 export default function Register() {
   const auth = useAuthStore()
   const init = useAuthStore((s) => s.init)
@@ -39,6 +41,16 @@ export default function Register() {
     }
   }
 
+  const onGoogleSignIn = async () => {
+    setError(null)
+    setNotice(null)
+    try {
+      await auth.signInWithGoogle('/mis-pedidos')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Error al continuar con Google')
+    }
+  }
+
   return (
     <div className="mx-auto max-w-md">
       <Card className="p-6">
@@ -66,6 +78,14 @@ export default function Register() {
           ) : null}
           <Button onClick={() => void onSubmit()} disabled={!email || password.length < 6 || !accepted || auth.loading}>
             Crear cuenta
+          </Button>
+          <div className="flex items-center gap-3">
+            <div className="h-px flex-1 bg-white/10" />
+            <div className="text-xs text-text-secondary">o</div>
+            <div className="h-px flex-1 bg-white/10" />
+          </div>
+          <Button variant="secondary" onClick={() => void onGoogleSignIn()} disabled={auth.loading} icon={<GoogleIcon />}>
+            Continuar con Google
           </Button>
           <div className="text-sm text-text-secondary">
             ¿Ya tenés cuenta? <Link to="/login">Entrá</Link>

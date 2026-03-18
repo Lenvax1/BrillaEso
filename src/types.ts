@@ -43,7 +43,6 @@ export type QuoteRequest = {
   payment_paid_at?: string | null
   payment_method?: 'transfer' | null
   payment_reference?: string | null
-  payment_receipt_url?: string | null
   payment_submitted_at?: string | null
   payment_verified_at?: string | null
   created_at: string
@@ -70,6 +69,10 @@ export type Order = {
   shipping_json: string | null
   created_at: string
   updated_at: string
+  quote_requests: {
+    contact_email: string
+    contact_phone: string | null
+  } | null
 }
 
 export type Notification = {

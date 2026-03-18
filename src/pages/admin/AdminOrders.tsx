@@ -30,9 +30,9 @@ export default function AdminOrders() {
       setLoadError(null)
       try {
         let attempt = 0
-        while (attempt < 2) {
+        while (attempt < 3) {
           const { data, error } = await withTimeout(
-            supabase.from('orders').select('*').order('created_at', { ascending: false }).limit(200),
+            supabase.from('orders').select('*, quote_requests(contact_email, contact_phone)').order('created_at', { ascending: false }).limit(200),
             20_000,
             'La carga tardó demasiado. Reintentá con Actualizar.'
           )
@@ -48,10 +48,14 @@ export default function AdminOrders() {
             attempt++
             continue
           }
+          if (attempt < 2) {
+            await new Promise((resolve) => window.setTimeout(resolve, 700))
+            attempt++
+            continue
+          }
           throw error
         }
       } catch (e) {
-        setItems([])
         setLoadError(e instanceof Error ? e.message : 'No se pudo cargar')
       } finally {
         setLoading(false)
@@ -128,6 +132,19 @@ export default function AdminOrders() {
     setBusy(true)
     const numeric = amount.trim() ? Number(amount) : null
     const nextStatus = quoteAccepted ? status : 'Creado'
+
+    if (nextStatus === 'Finalizado' && detail.quote_request_id) {
+      const { data: qr } = await supabase
+        .from('quote_requests')
+        .select('reference_image_url')
+        .eq('id', detail.quote_request_id)
+        .maybeSingle()
+
+      if (qr?.reference_image_url) {
+        await supabase.storage.from('references').remove([qr.reference_image_url])
+      }
+    }
+
     await supabase.from('orders').update({ status: nextStatus, total_amount: numeric }).eq('id', detail.id)
     if (detail.user_id) {
       await supabase.from('notifications').insert({
@@ -160,13 +177,14 @@ export default function AdminOrders() {
         </div>
       </div>
 
-      {loading ? <div className="h-72 animate-pulse rounded-xl border border-white/10 bg-white/5" /> : null}
+      {loading && items.length === 0 ? <div className="h-72 animate-pulse rounded-xl border border-white/10 bg-white/5" /> : null}
+      {loading && items.length > 0 ? <div className="text-xs text-text-secondary">Actualizando pedidos…</div> : null}
 
       {!loading && loadError ? (
         <div className="rounded-xl border border-danger/40 bg-danger/10 p-3 text-sm text-danger">{loadError}</div>
       ) : null}
 
-      {!loading && !loadError ? (
+      {!loadError && (!loading || items.length > 0) ? (
         <Card className="overflow-hidden">
           <div className="grid grid-cols-12 gap-2 border-b border-white/10 bg-white/5 px-4 py-3 text-xs text-text-secondary">
             <div className="col-span-2">ID</div>
@@ -182,7 +200,11 @@ export default function AdminOrders() {
               filtered.map((o) => (
                 <div key={o.id} className="grid grid-cols-12 items-center gap-2 border-b border-white/5 px-4 py-3">
                   <div className="col-span-2 text-sm text-text-primary">{o.id.slice(0, 8)}</div>
-                  <div className="col-span-3 text-sm text-text-secondary">{o.quote_request_id?.slice(0, 8) ?? '-'}</div>
+                  <div className="col-span-3 text-sm text-text-secondary">
+                    <div>{o.quote_requests?.contact_email ?? '-'}</div>
+                    <div className="text-text-secondary/80">{o.quote_requests?.contact_phone}</div>
+                    <div className="text-xs text-text-secondary/70">Quote: {o.quote_request_id?.slice(0, 8) ?? '-'}</div>
+                  </div>
                   <div className="col-span-2 text-sm text-text-secondary">{formatDateShort(o.created_at)}</div>
                   <div className="col-span-3">
                     <Badge tone={getStatusTone(o.status)}>{o.status}</Badge>
@@ -204,8 +226,8 @@ export default function AdminOrders() {
         {detail ? (
           <div className="grid gap-4">
             <Card className="p-4">
-              <div className="text-sm font-semibold text-text-primary">Pedido {detail.id}</div>
-              <div className="mt-1 text-sm text-text-secondary">Quote: {detail.quote_request_id ?? '-'}</div>
+              <div className="text-sm font-semibold text-text-primary">Editar pedido</div>
+              <div className="mt-1 text-sm text-text-secondary/70">ID: {detail.id}</div>
             </Card>
             <Card className="p-4">
               <div className="mb-2 text-xs text-text-secondary">Total (ARS)</div>

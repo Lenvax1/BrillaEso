@@ -22,7 +22,7 @@ export default function AdminGallery() {
       setLoadError(null)
       try {
         let attempt = 0
-        while (attempt < 2) {
+        while (attempt < 3) {
           const { data, error } = await withTimeout(
             supabase.from('gallery_works').select('*').order('created_at', { ascending: false }).limit(200),
             20_000,
@@ -40,10 +40,14 @@ export default function AdminGallery() {
             attempt++
             continue
           }
+          if (attempt < 2) {
+            await new Promise((resolve) => window.setTimeout(resolve, 700))
+            attempt++
+            continue
+          }
           throw error
         }
       } catch (e) {
-        setItems([])
         setLoadError(e instanceof Error ? e.message : 'No se pudo cargar')
       } finally {
         setLoading(false)
@@ -118,13 +122,14 @@ export default function AdminGallery() {
         </div>
       </div>
 
-      {loading ? <div className="h-72 animate-pulse rounded-xl border border-white/10 bg-white/5" /> : null}
+      {loading && items.length === 0 ? <div className="h-72 animate-pulse rounded-xl border border-white/10 bg-white/5" /> : null}
+      {loading && items.length > 0 ? <div className="text-xs text-text-secondary">Actualizando galería…</div> : null}
 
       {!loading && loadError ? (
         <div className="rounded-xl border border-danger/40 bg-danger/10 p-3 text-sm text-danger">{loadError}</div>
       ) : null}
 
-      {!loading && !loadError ? (
+      {!loadError && (!loading || items.length > 0) ? (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {items.map((w) => (
             <Card key={w.id} className="overflow-hidden">
