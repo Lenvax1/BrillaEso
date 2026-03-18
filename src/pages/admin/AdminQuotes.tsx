@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
@@ -11,6 +11,8 @@ import { formatDateShort, formatMoneyARS } from '@/lib/format'
 import { getStatusTone } from '@/lib/status'
 import { getSignedStorageUrl } from '@/lib/storage'
 import { withTimeout } from '@/lib/timeout'
+import { isAbortLikeError } from '@/lib/abort'
+import { getErrorMessage } from '@/lib/error'
 
 const QUOTE_STATUS_ALLOWED = 'Cotizado'
 type ParsedSpecs = {
@@ -319,45 +321,80 @@ export default function AdminQuotes() {
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [items, setItems] = useState<QuoteRequest[]>([])
+  const loadInFlight = useRef(false)
+  const loadAbort = useRef<AbortController | null>(null)
+  const loadToken = useRef(0)
   const [query, setQuery] = useState('')
   const [openId, setOpenId] = useState<string | null>(null)
   const [detail, setDetail] = useState<QuoteRequest | null>(null)
 
+  const resetLoad = () => {
+    loadToken.current += 1
+    loadAbort.current?.abort()
+    loadAbort.current = null
+    loadInFlight.current = false
+    setLoading(false)
+  }
+
   const load = useMemo(() => {
     return async () => {
+      if (document.visibilityState !== 'visible') return
+      if (loadInFlight.current) return
+      const token = (loadToken.current += 1)
+      const isStale = () => loadToken.current !== token
+      loadInFlight.current = true
       setLoading(true)
       setLoadError(null)
       try {
         let attempt = 0
         while (attempt < 3) {
-          const { data, error } = await withTimeout(
-            supabase.from('quote_requests').select('*').order('created_at', { ascending: false }).limit(200),
-            20_000,
-            'La carga tardó demasiado. Reintentá con Actualizar.'
-          )
+          const controller = new AbortController()
+          loadAbort.current?.abort()
+          loadAbort.current = controller
+
+          const query = supabase
+            .from('quote_requests')
+            .select('*')
+            .order('created_at', { ascending: false })
+            .limit(200)
+            .abortSignal(controller.signal)
+
+          const { data, error } = await withTimeout(query, 20_000, 'La carga tardó demasiado. Reintentá con Actualizar.', () => controller.abort())
+          if (isStale()) return
           if (!error) {
+            if (isStale()) return
             setItems((data as QuoteRequest[]) ?? [])
             return
           }
 
+          if (document.visibilityState !== 'visible') return
+          if (isAbortLikeError(error)) return
+
           const msg = String((error as { message?: unknown } | null)?.message ?? '')
           const looksAuth = msg.toLowerCase().includes('jwt') || msg.toLowerCase().includes('auth')
           if (looksAuth && attempt === 0) {
-            await supabase.auth.refreshSession().catch(() => null)
+            await withTimeout(supabase.auth.refreshSession(), 6_000, 'La sesión está tardando demasiado.').catch(() => null)
+            if (isStale()) return
             attempt++
             continue
           }
           if (attempt < 2) {
             await new Promise((resolve) => window.setTimeout(resolve, 700))
+            if (isStale()) return
             attempt++
             continue
           }
           throw error
         }
       } catch (e) {
-        setLoadError(e instanceof Error ? e.message : 'No se pudo cargar')
+        if (isStale()) return
+        if (isAbortLikeError(e)) return
+        setLoadError(getErrorMessage(e, 'No se pudo cargar'))
       } finally {
+        if (isStale()) return
         setLoading(false)
+        loadInFlight.current = false
+        loadAbort.current = null
       }
     }
   }, [])
@@ -368,14 +405,28 @@ export default function AdminQuotes() {
 
   useEffect(() => {
     const onVisible = () => {
+      if (document.visibilityState !== 'visible') {
+        resetLoad()
+        return
+      }
+      resetLoad()
+      window.setTimeout(() => void load(), 0)
+    }
+    const onOnline = () => {
       if (document.visibilityState === 'visible') void load()
     }
-    const onOnline = () => void load()
+    const onFocus = () => {
+      if (document.visibilityState !== 'visible') return
+      resetLoad()
+      window.setTimeout(() => void load(), 0)
+    }
     document.addEventListener('visibilitychange', onVisible)
     window.addEventListener('online', onOnline)
+    window.addEventListener('focus', onFocus)
     return () => {
       document.removeEventListener('visibilitychange', onVisible)
       window.removeEventListener('online', onOnline)
+      window.removeEventListener('focus', onFocus)
     }
   }, [load])
 
@@ -387,6 +438,7 @@ export default function AdminQuotes() {
         'postgres_changes',
         { event: '*', schema: 'public', table: 'quote_requests' },
         () => {
+          if (document.visibilityState !== 'visible') return
           if (t) window.clearTimeout(t)
           t = window.setTimeout(() => {
             void load()

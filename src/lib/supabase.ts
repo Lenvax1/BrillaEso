@@ -5,7 +5,12 @@ const DEFAULT_FETCH_TIMEOUT_MS = 45_000
 
 function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit) {
   const controller = new AbortController()
-  const t = window.setTimeout(() => controller.abort(), DEFAULT_FETCH_TIMEOUT_MS)
+  const timeoutSignal =
+    typeof AbortSignal !== 'undefined' && 'timeout' in AbortSignal
+      ? (AbortSignal as unknown as { timeout: (ms: number) => AbortSignal }).timeout(DEFAULT_FETCH_TIMEOUT_MS)
+      : null
+
+  const t = timeoutSignal ? null : window.setTimeout(() => controller.abort(), DEFAULT_FETCH_TIMEOUT_MS)
 
   const upstreamSignal = init?.signal
   if (upstreamSignal) {
@@ -13,8 +18,13 @@ function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit) {
     else upstreamSignal.addEventListener('abort', () => controller.abort(), { once: true })
   }
 
+  if (timeoutSignal) {
+    if (timeoutSignal.aborted) controller.abort()
+    else timeoutSignal.addEventListener('abort', () => controller.abort(), { once: true })
+  }
+
   return fetch(input, { ...init, signal: controller.signal }).finally(() => {
-    window.clearTimeout(t)
+    if (t) window.clearTimeout(t)
   })
 }
 

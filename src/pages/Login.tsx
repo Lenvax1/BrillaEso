@@ -4,6 +4,7 @@ import { Card } from '@/components/ui/Card'
 import { Input } from '@/components/ui/Input'
 import { Button } from '@/components/ui/Button'
 import { useAuthStore } from '@/stores/authStore'
+import { getErrorMessage } from '@/lib/error'
 
 import { GoogleIcon } from '@/components/ui/GoogleIcon'
 
@@ -30,7 +31,7 @@ export default function Login() {
       await auth.signIn({ email, password })
       nav(loc.state?.from ?? '/mis-pedidos', { replace: true })
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Error al iniciar sesión')
+      setError(getErrorMessage(e, 'Error al iniciar sesión'))
     }
   }
 
@@ -39,7 +40,7 @@ export default function Login() {
     try {
       await auth.signInWithGoogle(loc.state?.from ?? '/mis-pedidos')
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Error al iniciar sesión con Google')
+      setError(getErrorMessage(e, 'Error al iniciar sesión con Google'))
     }
   }
 

@@ -4,6 +4,7 @@ import { Card } from '@/components/ui/Card'
 import { Input } from '@/components/ui/Input'
 import { Button } from '@/components/ui/Button'
 import { useAuthStore } from '@/stores/authStore'
+import { getErrorMessage } from '@/lib/error'
 
 import { GoogleIcon } from '@/components/ui/GoogleIcon'
 
@@ -37,7 +38,7 @@ export default function Register() {
       }
       nav('/mis-pedidos', { replace: true })
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Error al registrarse')
+      setError(getErrorMessage(e, 'Error al registrarse'))
     }
   }
 
@@ -47,7 +48,7 @@ export default function Register() {
     try {
       await auth.signInWithGoogle('/mis-pedidos')
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Error al continuar con Google')
+      setError(getErrorMessage(e, 'Error al continuar con Google'))
     }
   }
 

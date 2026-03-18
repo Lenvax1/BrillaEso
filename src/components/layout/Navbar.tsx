@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { Bell, LogOut, Shield } from 'lucide-react'
 import { Logo } from '@/components/Logo'
@@ -6,6 +6,8 @@ import { Button } from '@/components/ui/Button'
 import { cn } from '@/lib/utils'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/stores/authStore'
+import type { Notification } from '@/types'
+import { formatDateShort } from '@/lib/format'
 
 function NavItem({ to, children }: { to: string; children: React.ReactNode }) {
   return (
@@ -30,6 +32,10 @@ export function Navbar() {
   const user = auth.user
   const profile = auth.profile
   const [unread, setUnread] = useState<number>(0)
+  const [openNotifications, setOpenNotifications] = useState(false)
+  const [notificationsLoading, setNotificationsLoading] = useState(false)
+  const [notifications, setNotifications] = useState<Notification[]>([])
+  const notifRef = useRef<HTMLDivElement | null>(null)
 
   const isAdmin = !!profile?.is_admin
   const showShellLinks = !pathname.startsWith('/admin')
@@ -54,6 +60,66 @@ export function Navbar() {
     void loadUnread()
   }, [loadUnread])
 
+  const loadNotifications = useMemo(() => {
+    return async () => {
+      if (!user) {
+        setNotifications([])
+        return
+      }
+      setNotificationsLoading(true)
+      try {
+        const { data, error } = await supabase
+          .from('notifications')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false })
+          .limit(10)
+        if (error) return
+        const list = (data as Notification[]) ?? []
+        setNotifications(list)
+        setUnread(list.filter((x) => !x.read_at).length)
+      } finally {
+        setNotificationsLoading(false)
+      }
+    }
+  }, [user])
+
+  useEffect(() => {
+    if (!user) {
+      setOpenNotifications(false)
+      setNotifications([])
+      return
+    }
+    if (openNotifications) void loadNotifications()
+  }, [openNotifications, loadNotifications, user])
+
+  useEffect(() => {
+    if (!openNotifications) return
+    const onMouseDown = (e: MouseEvent) => {
+      const target = e.target as Node | null
+      if (!target) return
+      if (!notifRef.current) return
+      if (!notifRef.current.contains(target)) setOpenNotifications(false)
+    }
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpenNotifications(false)
+    }
+    document.addEventListener('mousedown', onMouseDown)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', onMouseDown)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [openNotifications])
+
+  const markRead = async (id: string) => {
+    if (!user) return
+    const now = new Date().toISOString()
+    setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, read_at: now } : n)))
+    setUnread((prev) => (prev > 0 ? prev - 1 : 0))
+    await supabase.from('notifications').update({ read_at: now }).eq('id', id)
+  }
+
   const onSignOut = () => {
     navigate('/login', { replace: true })
     void auth.signOut()
@@ -75,14 +141,59 @@ export function Navbar() {
 
         <div className="flex items-center gap-2">
           {user ? (
-            <Link to="/mis-pedidos" className="relative rounded-lg p-2 text-text-secondary hover:bg-white/5">
-              <Bell className="h-5 w-5" />
-              {unread > 0 ? (
-                <span className="absolute right-1 top-1 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-neon-purple px-1 text-[11px] font-semibold text-bg">
-                  {unread > 99 ? '99+' : unread}
-                </span>
+            <div ref={notifRef} className="relative">
+              <button
+                type="button"
+                className="relative rounded-lg p-2 text-text-secondary hover:bg-white/5"
+                aria-label="Notificaciones"
+                aria-expanded={openNotifications}
+                onClick={() => setOpenNotifications((v) => !v)}
+              >
+                <Bell className="h-5 w-5" />
+                {unread > 0 ? (
+                  <span className="absolute right-1 top-1 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-neon-purple px-1 text-[11px] font-semibold text-bg">
+                    {unread > 99 ? '99+' : unread}
+                  </span>
+                ) : null}
+              </button>
+              {openNotifications ? (
+                <div className="absolute right-0 mt-2 w-[22rem] overflow-hidden rounded-xl border border-white/10 bg-bg/95 shadow-xl backdrop-blur">
+                  <div className="flex items-center justify-between border-b border-white/10 bg-white/5 px-3 py-2">
+                    <div className="text-sm font-semibold text-text-primary">Notificaciones</div>
+                    <Link to="/mis-pedidos" className="text-xs" onClick={() => setOpenNotifications(false)}>
+                      Ver todas
+                    </Link>
+                  </div>
+                  <div className="max-h-[60vh] overflow-auto">
+                    {notificationsLoading ? (
+                      <div className="p-3 text-sm text-text-secondary">Cargando…</div>
+                    ) : notifications.length === 0 ? (
+                      <div className="p-3 text-sm text-text-secondary">No tenés notificaciones.</div>
+                    ) : (
+                      notifications.map((n) => (
+                        <button
+                          key={n.id}
+                          type="button"
+                          className={
+                            'w-full px-3 py-3 text-left hover:bg-white/5 ' +
+                            (n.read_at ? 'bg-transparent' : 'bg-neon-purple/10')
+                          }
+                          onClick={() => {
+                            if (!n.read_at) void markRead(n.id)
+                            if (n.link_url) navigate(n.link_url)
+                            setOpenNotifications(false)
+                          }}
+                        >
+                          <div className="text-sm font-semibold text-text-primary">{n.title}</div>
+                          <div className="mt-1 text-sm text-text-secondary">{n.body}</div>
+                          <div className="mt-2 text-xs text-text-secondary">{formatDateShort(n.created_at)}</div>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </div>
               ) : null}
-            </Link>
+            </div>
           ) : null}
           {isAdmin ? (
             <Link

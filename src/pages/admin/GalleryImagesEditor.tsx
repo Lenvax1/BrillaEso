@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/Button'
 import { Spinner } from '@/components/ui/Spinner'
 import { supabase } from '@/lib/supabase'
 import { getPublicStorageUrl } from '@/lib/storage'
+import { getErrorMessage } from '@/lib/error'
 
 export type GalleryImagesModel = {
   cover_image_url: string
@@ -43,7 +44,7 @@ export function GalleryImagesEditor({
       const cover_image_url = model.cover_image_url || path
       onChange({ cover_image_url, images })
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'No se pudo subir la imagen')
+      setError(getErrorMessage(e, 'No se pudo subir la imagen'))
     } finally {
       setBusy(false)
     }

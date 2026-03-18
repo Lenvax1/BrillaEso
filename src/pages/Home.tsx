@@ -7,6 +7,7 @@ import { GalleryCard } from '@/components/gallery/GalleryCard'
 import { supabase } from '@/lib/supabase'
 import type { GalleryWork } from '@/types'
 import { withTimeout } from '@/lib/timeout'
+import { getErrorMessage } from '@/lib/error'
 
 export default function Home() {
   const [loading, setLoading] = useState(true)
@@ -32,14 +33,14 @@ export default function Home() {
         )
         if (!alive) return
         if (error) {
-          setError(error.message)
+          setError(getErrorMessage(error, 'No se pudo cargar la galería'))
           setWorks([])
         } else {
           setWorks((data as GalleryWork[]) ?? [])
         }
       } catch (e) {
         if (!alive) return
-        setError(e instanceof Error ? e.message : 'No se pudo cargar la galería')
+        setError(getErrorMessage(e, 'No se pudo cargar la galería'))
         setWorks([])
       } finally {
         if (alive) setLoading(false)

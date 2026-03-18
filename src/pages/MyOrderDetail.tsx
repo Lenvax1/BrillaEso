@@ -59,7 +59,7 @@ export default function MyOrderDetail() {
           const msg = String(error?.message ?? '').toLowerCase()
           const looksAuth = msg.includes('jwt') || msg.includes('auth')
           if (looksAuth && i === 0) {
-            await supabase.auth.refreshSession().catch(() => null)
+            await withTimeout(supabase.auth.refreshSession(), 6_000, 'La sesión está tardando demasiado.').catch(() => null)
             continue
           }
           if (error) throw error

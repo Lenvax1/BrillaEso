@@ -8,6 +8,7 @@ import { Modal } from '@/components/ui/Modal'
 import { supabase } from '@/lib/supabase'
 import type { GalleryWork, GalleryWorkImage } from '@/types'
 import { GalleryImagesEditor } from '@/pages/admin/GalleryImagesEditor'
+import { getErrorMessage } from '@/lib/error'
 
 type EditModel = {
   id?: string
@@ -168,7 +169,7 @@ export function GalleryEditorModal({
       onSaved()
       onClose()
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'No se pudo guardar')
+      setError(getErrorMessage(e, 'No se pudo guardar'))
     } finally {
       setBusy(false)
     }

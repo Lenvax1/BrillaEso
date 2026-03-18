@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
@@ -9,6 +9,8 @@ import { getStatusTone } from '@/lib/status'
 import { withTimeout } from '@/lib/timeout'
 import type { Notification, Order, QuoteRequest } from '@/types'
 import { useAuthStore } from '@/stores/authStore'
+import { isAbortLikeError } from '@/lib/abort'
+import { getErrorMessage } from '@/lib/error'
 
 type Tab = 'pedidos' | 'notificaciones'
 
@@ -22,6 +24,17 @@ export default function MyOrders() {
   const [quotes, setQuotes] = useState<QuoteRequest[]>([])
   const [orders, setOrders] = useState<Order[]>([])
   const [notifications, setNotifications] = useState<Notification[]>([])
+  const loadInFlight = useRef(false)
+  const loadAbort = useRef<AbortController | null>(null)
+  const loadToken = useRef(0)
+
+  const resetLoad = () => {
+    loadToken.current += 1
+    loadAbort.current?.abort()
+    loadAbort.current = null
+    loadInFlight.current = false
+    setLoading(false)
+  }
 
   const unifiedRequests = useMemo(() => {
     const list = quotes.map((q) => {
@@ -57,11 +70,18 @@ export default function MyOrders() {
 
   const load = useMemo(() => {
     return async () => {
+      if (document.visibilityState !== 'visible') return
+      if (loadInFlight.current) return
+      const token = (loadToken.current += 1)
+      const isStale = () => loadToken.current !== token
+      loadInFlight.current = true
       if (!user?.id) {
+        if (isStale()) return
         setQuotes([])
         setOrders([])
         setNotifications([])
         setLoading(false)
+        loadInFlight.current = false
         return
       }
       setLoading(true)
@@ -69,42 +89,62 @@ export default function MyOrders() {
       try {
         let attempt = 0
         while (attempt < 3) {
+          const controller = new AbortController()
+          loadAbort.current?.abort()
+          loadAbort.current = controller
+
+          const req = Promise.all([
+            supabase.from('quote_requests').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).abortSignal(controller.signal),
+            supabase.from('orders').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).abortSignal(controller.signal),
+            supabase.from('notifications').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).abortSignal(controller.signal),
+          ])
+
           const [{ data: q, error: qErr }, { data: o, error: oErr }, { data: n, error: nErr }] = await withTimeout(
-            Promise.all([
-              supabase.from('quote_requests').select('*').eq('user_id', user.id).order('created_at', { ascending: false }),
-              supabase.from('orders').select('*').eq('user_id', user.id).order('created_at', { ascending: false }),
-              supabase.from('notifications').select('*').eq('user_id', user.id).order('created_at', { ascending: false }),
-            ]),
+            req,
             20_000,
-            'La carga tardó demasiado. Reintentá con Actualizar.'
+            'La carga tardó demasiado. Reintentá con Actualizar.',
+            () => controller.abort()
           )
+
+          if (isStale()) return
 
           const anyError = qErr ?? oErr ?? nErr
           if (!anyError) {
+            if (isStale()) return
             setQuotes((q as QuoteRequest[]) ?? [])
             setOrders((o as Order[]) ?? [])
             setNotifications((n as Notification[]) ?? [])
             return
           }
 
+          if (document.visibilityState !== 'visible') return
+          if (isAbortLikeError(anyError)) return
+
           const msg = String((anyError as { message?: unknown } | null)?.message ?? '')
           const looksAuth = msg.toLowerCase().includes('jwt') || msg.toLowerCase().includes('auth')
           if (looksAuth && attempt === 0) {
-            await supabase.auth.refreshSession().catch(() => null)
+            await withTimeout(supabase.auth.refreshSession(), 6_000, 'La sesión está tardando demasiado.').catch(() => null)
+            if (isStale()) return
             attempt++
             continue
           }
           if (attempt < 2) {
             await new Promise((resolve) => window.setTimeout(resolve, 700))
+            if (isStale()) return
             attempt++
             continue
           }
           throw anyError
         }
       } catch (e) {
-        setLoadError(e instanceof Error ? e.message : 'No se pudo cargar')
+        if (isStale()) return
+        if (isAbortLikeError(e)) return
+        setLoadError(getErrorMessage(e, 'No se pudo cargar'))
       } finally {
+        if (isStale()) return
         setLoading(false)
+        loadInFlight.current = false
+        loadAbort.current = null
       }
     }
   }, [user?.id])
@@ -119,14 +159,28 @@ export default function MyOrders() {
 
   useEffect(() => {
     const onVisible = () => {
+      if (document.visibilityState !== 'visible') {
+        resetLoad()
+        return
+      }
+      resetLoad()
+      window.setTimeout(() => void load(), 0)
+    }
+    const onOnline = () => {
       if (document.visibilityState === 'visible') void load()
     }
-    const onOnline = () => void load()
+    const onFocus = () => {
+      if (document.visibilityState !== 'visible') return
+      resetLoad()
+      window.setTimeout(() => void load(), 0)
+    }
     document.addEventListener('visibilitychange', onVisible)
     window.addEventListener('online', onOnline)
+    window.addEventListener('focus', onFocus)
     return () => {
       document.removeEventListener('visibilitychange', onVisible)
       window.removeEventListener('online', onOnline)
+      window.removeEventListener('focus', onFocus)
     }
   }, [load])
 

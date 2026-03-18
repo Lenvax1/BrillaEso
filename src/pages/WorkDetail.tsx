@@ -9,6 +9,7 @@ import { supabase } from '@/lib/supabase'
 import type { GalleryWork, GalleryWorkImage } from '@/types'
 import { getPublicStorageUrl } from '@/lib/storage'
 import { withTimeout } from '@/lib/timeout'
+import { getErrorMessage } from '@/lib/error'
 
 export default function WorkDetail() {
   const { id } = useParams()
@@ -56,7 +57,7 @@ export default function WorkDetail() {
         setImgs((images as GalleryWorkImage[]) ?? [])
       } catch (e) {
         if (!alive) return
-        setError(e instanceof Error ? e.message : 'No se pudo cargar el trabajo')
+        setError(getErrorMessage(e, 'No se pudo cargar el trabajo'))
         setWork(null)
         setImgs([])
       } finally {
