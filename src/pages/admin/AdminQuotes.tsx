@@ -122,6 +122,13 @@ function ModalContent({ detail }: { detail: QuoteRequest | null }) {
         link_url: `/mis-pedidos/${detail.id}`,
       })
     }
+    
+    // Forzar actualización local para UI rápida
+    detail.status = nextStatus
+    detail.quoted_price = numeric
+    detail.preview_image_url = previewUrl
+    setStatus(nextStatus)
+    
     setBusy(false)
   }
 
@@ -155,14 +162,33 @@ function ModalContent({ detail }: { detail: QuoteRequest | null }) {
       body: 'Verificamos tu transferencia. Continuamos con la producción.',
       link_url: `/mis-pedidos/${detail.id}`,
     })
+    // Forzar una actualización de la cotización actual para que la UI se refresque rápido
+    detail.payment_status = 'paid'
     setBusy(false)
   }
 
   return (
     <div className="grid gap-4">
       <div className="grid gap-4 lg:grid-cols-2">
-        <Card className="overflow-hidden">
-          {detailImg ? <img src={detailImg} alt="Referencia" className="w-full object-cover" /> : <div className="aspect-[4/3] bg-white/5" />}
+        <Card className="overflow-hidden relative group">
+          {detailImg ? (
+            <>
+              <img src={detailImg} alt="Referencia" className="w-full object-cover" />
+              <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                <a
+                  href={detailImg}
+                  download={`referencia-${detail.id.slice(0, 8)}.jpg`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="rounded-lg bg-white/10 px-4 py-2 text-sm font-medium text-white hover:bg-white/20 backdrop-blur-sm"
+                >
+                  Descargar Referencia
+                </a>
+              </div>
+            </>
+          ) : (
+            <div className="aspect-[4/3] bg-white/5" />
+          )}
         </Card>
         <Card className="p-4">
           <div className="text-sm font-semibold text-text-primary">{detail.contact_email}</div>

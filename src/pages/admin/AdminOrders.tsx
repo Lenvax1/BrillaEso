@@ -9,6 +9,7 @@ import type { Order } from '@/types'
 import { formatDateShort, formatMoneyARS } from '@/lib/format'
 import { getStatusTone } from '@/lib/status'
 import { withTimeout } from '@/lib/timeout'
+import { getSignedStorageUrl } from '@/lib/storage'
 
 const ORDER_STATUSES = ['Creado', 'En producción', 'Listo', 'Enviado', 'Finalizado', 'Cancelado']
 
@@ -23,6 +24,7 @@ export default function AdminOrders() {
   const [amount, setAmount] = useState<string>('')
   const [busy, setBusy] = useState(false)
   const [quoteAccepted, setQuoteAccepted] = useState<boolean>(false)
+  const [orderImg, setOrderImg] = useState<string>('')
 
   const load = useMemo(() => {
     return async () => {
@@ -119,6 +121,19 @@ export default function AdminOrders() {
         setQuoteAccepted(decision === 'accepted' || paid)
       })()
     }
+
+    if (found?.image_url) {
+      void (async () => {
+        try {
+          const signed = await getSignedStorageUrl('previews', found.image_url)
+          setOrderImg(signed)
+        } catch {
+          setOrderImg('')
+        }
+      })()
+    } else {
+      setOrderImg('')
+    }
   }, [openId, items])
 
   const filtered = items.filter((x) => {
@@ -136,12 +151,15 @@ export default function AdminOrders() {
     if (nextStatus === 'Finalizado' && detail.quote_request_id) {
       const { data: qr } = await supabase
         .from('quote_requests')
-        .select('reference_image_url')
+        .select('reference_image_url, preview_image_url')
         .eq('id', detail.quote_request_id)
         .maybeSingle()
 
       if (qr?.reference_image_url) {
-        await supabase.storage.from('references').remove([qr.reference_image_url])
+        await supabase.storage.from('references').remove([qr.reference_image_url]).catch(() => null)
+      }
+      if (qr?.preview_image_url) {
+        await supabase.storage.from('previews').remove([qr.preview_image_url]).catch(() => null)
       }
     }
 
@@ -229,6 +247,11 @@ export default function AdminOrders() {
               <div className="text-sm font-semibold text-text-primary">Editar pedido</div>
               <div className="mt-1 text-sm text-text-secondary/70">ID: {detail.id}</div>
             </Card>
+            {orderImg ? (
+              <Card className="overflow-hidden">
+                <img src={orderImg} alt="Imagen del pedido" className="w-full object-cover" />
+              </Card>
+            ) : null}
             <Card className="p-4">
               <div className="mb-2 text-xs text-text-secondary">Total (ARS)</div>
               <Input value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="Ej: 65000" />
