@@ -10,6 +10,7 @@ import { formatDateShort, formatMoneyARS } from '@/lib/format'
 import { getStatusTone } from '@/lib/status'
 import { getSignedStorageUrl } from '@/lib/storage'
 import { getErrorMessage } from '@/lib/error'
+import { isAbortLikeError } from '@/lib/abort'
 import { loadWithSessionRetry } from '@/lib/load'
 import { useAutoRefresh } from '@/hooks/useAutoRefresh'
 
@@ -27,34 +28,50 @@ export default function AdminOrders() {
   const [busy, setBusy] = useState(false)
   const [quoteAccepted, setQuoteAccepted] = useState<boolean>(false)
   const [orderImg, setOrderImg] = useState<string>('')
+  const loadAbort = useRef<AbortController | null>(null)
   const loadInFlight = useRef(false)
+  const resetLoad = useCallback(() => {
+    loadAbort.current?.abort()
+    loadAbort.current = null
+    loadInFlight.current = false
+    setLoading(false)
+  }, [])
+
   const load = useCallback(async () => {
     if (loadInFlight.current) return
 
+    const controller = new AbortController()
+    loadAbort.current?.abort()
+    loadAbort.current = controller
     loadInFlight.current = true
     setLoading(true)
     setLoadError(null)
 
     try {
-      const { data, error } = await loadWithSessionRetry(() =>
+      const { data, error } = await loadWithSessionRetry(
+        (signal) =>
         supabase
           .from('orders')
           .select('*, quote_requests(contact_email, contact_phone)')
           .order('created_at', { ascending: false })
           .limit(200)
+          .abortSignal(signal),
+        { signal: controller.signal }
       )
 
       if (error) throw error
       setItems((data as Order[]) ?? [])
     } catch (e) {
+      if (isAbortLikeError(e)) return
       setLoadError(getErrorMessage(e, 'No se pudo cargar'))
     } finally {
+      if (loadAbort.current === controller) loadAbort.current = null
       setLoading(false)
       loadInFlight.current = false
     }
   }, [])
 
-  useAutoRefresh(load, { channel: 'admin-orders', table: 'orders' })
+  useAutoRefresh(load, { onHidden: resetLoad, realtime: { channel: 'admin-orders', table: 'orders' } })
 
   useEffect(() => {
     if (!openId) {

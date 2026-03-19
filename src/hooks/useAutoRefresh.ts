@@ -8,11 +8,17 @@ type RealtimeOptions = {
   delayMs?: number
 }
 
-export function useAutoRefresh(load: () => void | Promise<void>, realtime?: RealtimeOptions) {
-  const realtimeChannel = realtime?.channel
-  const realtimeDelayMs = realtime?.delayMs
-  const realtimeSchema = realtime?.schema ?? 'public'
-  const realtimeTable = realtime?.table
+type AutoRefreshOptions = {
+  realtime?: RealtimeOptions
+  onHidden?: () => void
+}
+
+export function useAutoRefresh(load: () => void | Promise<void>, options?: AutoRefreshOptions) {
+  const realtimeChannel = options?.realtime?.channel
+  const realtimeDelayMs = options?.realtime?.delayMs
+  const realtimeSchema = options?.realtime?.schema ?? 'public'
+  const realtimeTable = options?.realtime?.table
+  const onHidden = options?.onHidden
 
   useEffect(() => {
     void load()
@@ -24,7 +30,12 @@ export function useAutoRefresh(load: () => void | Promise<void>, realtime?: Real
     }
 
     const onVisible = () => {
-      if (document.visibilityState === 'visible') refresh()
+      if (document.visibilityState !== 'visible') {
+        onHidden?.()
+        return
+      }
+
+      window.setTimeout(refresh, 0)
     }
 
     document.addEventListener('visibilitychange', onVisible)
@@ -36,7 +47,7 @@ export function useAutoRefresh(load: () => void | Promise<void>, realtime?: Real
       window.removeEventListener('focus', refresh)
       window.removeEventListener('online', refresh)
     }
-  }, [load])
+  }, [load, onHidden])
 
   useEffect(() => {
     if (!realtimeChannel || !realtimeTable) return

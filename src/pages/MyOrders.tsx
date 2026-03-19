@@ -9,6 +9,7 @@ import { getStatusTone } from '@/lib/status'
 import type { Notification, Order, QuoteRequest } from '@/types'
 import { useAuthStore } from '@/stores/authStore'
 import { getErrorMessage } from '@/lib/error'
+import { isAbortLikeError } from '@/lib/abort'
 import { loadWithSessionRetry } from '@/lib/load'
 import { useAutoRefresh } from '@/hooks/useAutoRefresh'
 
@@ -24,7 +25,15 @@ export default function MyOrders() {
   const [quotes, setQuotes] = useState<QuoteRequest[]>([])
   const [orders, setOrders] = useState<Order[]>([])
   const [notifications, setNotifications] = useState<Notification[]>([])
+  const loadAbort = useRef<AbortController | null>(null)
   const loadInFlight = useRef(false)
+
+  const resetLoad = useCallback(() => {
+    loadAbort.current?.abort()
+    loadAbort.current = null
+    loadInFlight.current = false
+    setLoading(false)
+  }, [])
 
   const unifiedRequests = useMemo(() => {
     const list = quotes.map((q) => {
@@ -62,27 +71,31 @@ export default function MyOrders() {
     if (loadInFlight.current) return
 
     if (!user?.id) {
+      resetLoad()
       setQuotes([])
       setOrders([])
       setNotifications([])
-      setLoading(false)
       return
     }
 
+    const controller = new AbortController()
+    loadAbort.current?.abort()
+    loadAbort.current = controller
     loadInFlight.current = true
     setLoading(true)
     setLoadError(null)
 
     try {
-      const result = await loadWithSessionRetry(() =>
+      const result = await loadWithSessionRetry((signal) =>
         Promise.all([
-          supabase.from('quote_requests').select('*').eq('user_id', user.id).order('created_at', { ascending: false }),
-          supabase.from('orders').select('*').eq('user_id', user.id).order('created_at', { ascending: false }),
-          supabase.from('notifications').select('*').eq('user_id', user.id).order('created_at', { ascending: false }),
+          supabase.from('quote_requests').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).abortSignal(signal),
+          supabase.from('orders').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).abortSignal(signal),
+          supabase.from('notifications').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).abortSignal(signal),
         ]).then(([quotesResult, ordersResult, notificationsResult]) => ({
           data: [quotesResult.data, ordersResult.data, notificationsResult.data] as const,
           error: quotesResult.error ?? ordersResult.error ?? notificationsResult.error,
-        }))
+        })),
+        { signal: controller.signal }
       )
 
       const anyError = result.error
@@ -94,18 +107,20 @@ export default function MyOrders() {
       setOrders((o as Order[]) ?? [])
       setNotifications((n as Notification[]) ?? [])
     } catch (e) {
+      if (isAbortLikeError(e)) return
       setLoadError(getErrorMessage(e, 'No se pudo cargar'))
     } finally {
+      if (loadAbort.current === controller) loadAbort.current = null
       setLoading(false)
       loadInFlight.current = false
     }
-  }, [user?.id])
+  }, [resetLoad, user?.id])
 
   useEffect(() => {
     void init()
   }, [init])
 
-  useAutoRefresh(load)
+  useAutoRefresh(load, { onHidden: resetLoad })
 
   const unread = notifications.filter((x) => !x.read_at).length
 

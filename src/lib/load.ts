@@ -16,18 +16,29 @@ function looksLikeAuthError(error: { message?: unknown } | null) {
 }
 
 export async function loadWithSessionRetry<T>(
-  runQuery: () => PromiseLike<SupabaseResult<T>>,
+  runQuery: (signal: AbortSignal) => PromiseLike<SupabaseResult<T>>,
   options?: {
+    signal?: AbortSignal
     queryTimeoutMs?: number
     queryTimeoutMessage?: string
     sessionTimeoutMessage?: string
   }
 ) {
+  const upstreamSignal = options?.signal
   const queryTimeoutMs = options?.queryTimeoutMs ?? DEFAULT_QUERY_TIMEOUT_MS
   const queryTimeoutMessage = options?.queryTimeoutMessage ?? DEFAULT_QUERY_TIMEOUT_MESSAGE
   const sessionTimeoutMessage = options?.sessionTimeoutMessage ?? DEFAULT_SESSION_TIMEOUT_MESSAGE
 
-  const run = () => withTimeout(runQuery(), queryTimeoutMs, queryTimeoutMessage)
+  const run = () => {
+    const controller = new AbortController()
+
+    if (upstreamSignal) {
+      if (upstreamSignal.aborted) controller.abort()
+      else upstreamSignal.addEventListener('abort', () => controller.abort(), { once: true })
+    }
+
+    return withTimeout(runQuery(controller.signal), queryTimeoutMs, queryTimeoutMessage, () => controller.abort())
+  }
 
   let result = await run()
   if (!result.error || !looksLikeAuthError(result.error)) return result

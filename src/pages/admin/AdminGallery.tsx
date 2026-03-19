@@ -8,6 +8,7 @@ import type { GalleryWork } from '@/types'
 import { getPublicStorageUrl } from '@/lib/storage'
 import { GalleryEditorModal } from '@/pages/admin/GalleryEditorModal'
 import { getErrorMessage } from '@/lib/error'
+import { isAbortLikeError } from '@/lib/abort'
 import { loadWithSessionRetry } from '@/lib/load'
 import { useAutoRefresh } from '@/hooks/useAutoRefresh'
 
@@ -17,30 +18,45 @@ export default function AdminGallery() {
   const [items, setItems] = useState<GalleryWork[]>([])
   const [open, setOpen] = useState(false)
   const [workId, setWorkId] = useState<string | null>(null)
+  const loadAbort = useRef<AbortController | null>(null)
   const loadInFlight = useRef(false)
+  const resetLoad = useCallback(() => {
+    loadAbort.current?.abort()
+    loadAbort.current = null
+    loadInFlight.current = false
+    setLoading(false)
+  }, [])
+
   const load = useCallback(async () => {
     if (loadInFlight.current) return
 
+    const controller = new AbortController()
+    loadAbort.current?.abort()
+    loadAbort.current = controller
     loadInFlight.current = true
     setLoading(true)
     setLoadError(null)
 
     try {
-      const { data, error } = await loadWithSessionRetry(() =>
-        supabase.from('gallery_works').select('*').order('created_at', { ascending: false }).limit(200)
+      const { data, error } = await loadWithSessionRetry(
+        (signal) =>
+          supabase.from('gallery_works').select('*').order('created_at', { ascending: false }).limit(200).abortSignal(signal),
+        { signal: controller.signal }
       )
 
       if (error) throw error
       setItems((data as GalleryWork[]) ?? [])
     } catch (e) {
+      if (isAbortLikeError(e)) return
       setLoadError(getErrorMessage(e, 'No se pudo cargar'))
     } finally {
+      if (loadAbort.current === controller) loadAbort.current = null
       setLoading(false)
       loadInFlight.current = false
     }
   }, [])
 
-  useAutoRefresh(load, { channel: 'admin-gallery-works', table: 'gallery_works' })
+  useAutoRefresh(load, { onHidden: resetLoad, realtime: { channel: 'admin-gallery-works', table: 'gallery_works' } })
 
   const openCreate = () => {
     setWorkId(null)

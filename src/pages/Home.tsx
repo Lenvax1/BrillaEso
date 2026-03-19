@@ -7,6 +7,7 @@ import { GalleryCard } from '@/components/gallery/GalleryCard'
 import { supabase } from '@/lib/supabase'
 import type { GalleryWork } from '@/types'
 import { getErrorMessage } from '@/lib/error'
+import { isAbortLikeError } from '@/lib/abort'
 import { loadWithSessionRetry } from '@/lib/load'
 import { useAutoRefresh } from '@/hooks/useAutoRefresh'
 
@@ -14,40 +15,57 @@ export default function Home() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [works, setWorks] = useState<GalleryWork[]>([])
+  const loadAbort = useRef<AbortController | null>(null)
   const loadInFlight = useRef(false)
+
+  const resetLoad = useCallback(() => {
+    loadAbort.current?.abort()
+    loadAbort.current = null
+    loadInFlight.current = false
+    setLoading(false)
+  }, [])
 
   const load = useCallback(async () => {
     if (loadInFlight.current) return
 
+    const controller = new AbortController()
+    loadAbort.current?.abort()
+    loadAbort.current = controller
     loadInFlight.current = true
     setLoading(true)
     setError(null)
 
     try {
       const { data, error } = await loadWithSessionRetry(
-        () =>
+        (signal) =>
           supabase
             .from('gallery_works')
             .select('*')
             .eq('is_published', true)
             .order('is_featured', { ascending: false })
             .order('created_at', { ascending: false })
-            .limit(60),
-        { queryTimeoutMessage: 'La galería está tardando demasiado en cargar. Reintentá.' }
+            .limit(60)
+            .abortSignal(signal),
+        {
+          signal: controller.signal,
+          queryTimeoutMessage: 'La galería está tardando demasiado en cargar. Reintentá.',
+        }
       )
 
       if (error) throw error
       setWorks((data as GalleryWork[]) ?? [])
     } catch (e) {
+      if (isAbortLikeError(e)) return
       setError(getErrorMessage(e, 'No se pudo cargar la galería'))
       setWorks([])
     } finally {
+      if (loadAbort.current === controller) loadAbort.current = null
       setLoading(false)
       loadInFlight.current = false
     }
   }, [])
 
-  useAutoRefresh(load)
+  useAutoRefresh(load, { onHidden: resetLoad })
 
   return (
     <div className="flex flex-col gap-10">

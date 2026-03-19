@@ -11,6 +11,7 @@ import { formatDateShort, formatMoneyARS } from '@/lib/format'
 import { getStatusTone } from '@/lib/status'
 import { getSignedStorageUrl } from '@/lib/storage'
 import { getErrorMessage } from '@/lib/error'
+import { isAbortLikeError } from '@/lib/abort'
 import { loadWithSessionRetry } from '@/lib/load'
 import { useAutoRefresh } from '@/hooks/useAutoRefresh'
 
@@ -321,34 +322,48 @@ export default function AdminQuotes() {
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [items, setItems] = useState<QuoteRequest[]>([])
+  const loadAbort = useRef<AbortController | null>(null)
   const loadInFlight = useRef(false)
   const [query, setQuery] = useState('')
   const [openId, setOpenId] = useState<string | null>(null)
   const [detail, setDetail] = useState<QuoteRequest | null>(null)
+  const resetLoad = useCallback(() => {
+    loadAbort.current?.abort()
+    loadAbort.current = null
+    loadInFlight.current = false
+    setLoading(false)
+  }, [])
 
   const load = useCallback(async () => {
     if (loadInFlight.current) return
 
+    const controller = new AbortController()
+    loadAbort.current?.abort()
+    loadAbort.current = controller
     loadInFlight.current = true
     setLoading(true)
     setLoadError(null)
 
     try {
-      const { data, error } = await loadWithSessionRetry(() =>
-        supabase.from('quote_requests').select('*').order('created_at', { ascending: false }).limit(200)
+      const { data, error } = await loadWithSessionRetry(
+        (signal) =>
+          supabase.from('quote_requests').select('*').order('created_at', { ascending: false }).limit(200).abortSignal(signal),
+        { signal: controller.signal }
       )
 
       if (error) throw error
       setItems((data as QuoteRequest[]) ?? [])
     } catch (e) {
+      if (isAbortLikeError(e)) return
       setLoadError(getErrorMessage(e, 'No se pudo cargar'))
     } finally {
+      if (loadAbort.current === controller) loadAbort.current = null
       setLoading(false)
       loadInFlight.current = false
     }
   }, [])
 
-  useAutoRefresh(load, { channel: 'admin-quote-requests', table: 'quote_requests' })
+  useAutoRefresh(load, { onHidden: resetLoad, realtime: { channel: 'admin-quote-requests', table: 'quote_requests' } })
 
   useEffect(() => {
     if (!openId) {
