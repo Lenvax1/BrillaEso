@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowRight, Sparkles } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
@@ -6,21 +6,26 @@ import { Card } from '@/components/ui/Card'
 import { GalleryCard } from '@/components/gallery/GalleryCard'
 import { supabase } from '@/lib/supabase'
 import type { GalleryWork } from '@/types'
-import { withTimeout } from '@/lib/timeout'
 import { getErrorMessage } from '@/lib/error'
+import { loadWithSessionRetry } from '@/lib/load'
+import { useAutoRefresh } from '@/hooks/useAutoRefresh'
 
 export default function Home() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [works, setWorks] = useState<GalleryWork[]>([])
+  const loadInFlight = useRef(false)
 
-  useEffect(() => {
-    let alive = true
-    ;(async () => {
-      setLoading(true)
-      setError(null)
-      try {
-        const { data, error } = await withTimeout(
+  const load = useCallback(async () => {
+    if (loadInFlight.current) return
+
+    loadInFlight.current = true
+    setLoading(true)
+    setError(null)
+
+    try {
+      const { data, error } = await loadWithSessionRetry(
+        () =>
           supabase
             .from('gallery_works')
             .select('*')
@@ -28,28 +33,21 @@ export default function Home() {
             .order('is_featured', { ascending: false })
             .order('created_at', { ascending: false })
             .limit(60),
-          20_000,
-          'La galería está tardando demasiado en cargar. Reintentá.'
-        )
-        if (!alive) return
-        if (error) {
-          setError(getErrorMessage(error, 'No se pudo cargar la galería'))
-          setWorks([])
-        } else {
-          setWorks((data as GalleryWork[]) ?? [])
-        }
-      } catch (e) {
-        if (!alive) return
-        setError(getErrorMessage(e, 'No se pudo cargar la galería'))
-        setWorks([])
-      } finally {
-        if (alive) setLoading(false)
-      }
-    })()
-    return () => {
-      alive = false
+        { queryTimeoutMessage: 'La galería está tardando demasiado en cargar. Reintentá.' }
+      )
+
+      if (error) throw error
+      setWorks((data as GalleryWork[]) ?? [])
+    } catch (e) {
+      setError(getErrorMessage(e, 'No se pudo cargar la galería'))
+      setWorks([])
+    } finally {
+      setLoading(false)
+      loadInFlight.current = false
     }
   }, [])
+
+  useAutoRefresh(load)
 
   return (
     <div className="flex flex-col gap-10">

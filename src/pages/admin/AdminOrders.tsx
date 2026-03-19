@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
@@ -8,10 +8,10 @@ import { supabase } from '@/lib/supabase'
 import type { Order } from '@/types'
 import { formatDateShort, formatMoneyARS } from '@/lib/format'
 import { getStatusTone } from '@/lib/status'
-import { withTimeout } from '@/lib/timeout'
 import { getSignedStorageUrl } from '@/lib/storage'
-import { isAbortLikeError } from '@/lib/abort'
 import { getErrorMessage } from '@/lib/error'
+import { loadWithSessionRetry } from '@/lib/load'
+import { useAutoRefresh } from '@/hooks/useAutoRefresh'
 
 const ORDER_STATUSES = ['Creado', 'En producción', 'Listo', 'Enviado', 'Finalizado', 'Cancelado']
 
@@ -28,127 +28,33 @@ export default function AdminOrders() {
   const [quoteAccepted, setQuoteAccepted] = useState<boolean>(false)
   const [orderImg, setOrderImg] = useState<string>('')
   const loadInFlight = useRef(false)
-  const loadAbort = useRef<AbortController | null>(null)
-  const loadToken = useRef(0)
+  const load = useCallback(async () => {
+    if (loadInFlight.current) return
 
-  const resetLoad = () => {
-    loadToken.current += 1
-    loadAbort.current?.abort()
-    loadAbort.current = null
-    loadInFlight.current = false
-    setLoading(false)
-  }
+    loadInFlight.current = true
+    setLoading(true)
+    setLoadError(null)
 
-  const load = useMemo(() => {
-    return async () => {
-      if (document.visibilityState !== 'visible') return
-      if (loadInFlight.current) return
-      const token = (loadToken.current += 1)
-      const isStale = () => loadToken.current !== token
-      loadInFlight.current = true
-      setLoading(true)
-      setLoadError(null)
-      try {
-        let attempt = 0
-        while (attempt < 3) {
-          const controller = new AbortController()
-          loadAbort.current?.abort()
-          loadAbort.current = controller
+    try {
+      const { data, error } = await loadWithSessionRetry(() =>
+        supabase
+          .from('orders')
+          .select('*, quote_requests(contact_email, contact_phone)')
+          .order('created_at', { ascending: false })
+          .limit(200)
+      )
 
-          const query = supabase
-            .from('orders')
-            .select('*, quote_requests(contact_email, contact_phone)')
-            .order('created_at', { ascending: false })
-            .limit(200)
-            .abortSignal(controller.signal)
-
-          const { data, error } = await withTimeout(query, 20_000, 'La carga tardó demasiado. Reintentá con Actualizar.', () => controller.abort())
-          if (isStale()) return
-          if (!error) {
-            if (isStale()) return
-            setItems((data as Order[]) ?? [])
-            return
-          }
-
-          if (document.visibilityState !== 'visible') return
-          if (isAbortLikeError(error)) return
-
-          const msg = String((error as { message?: unknown } | null)?.message ?? '')
-          const looksAuth = msg.toLowerCase().includes('jwt') || msg.toLowerCase().includes('auth')
-          if (looksAuth && attempt === 0) {
-            await withTimeout(supabase.auth.refreshSession(), 6_000, 'La sesión está tardando demasiado.').catch(() => null)
-            if (isStale()) return
-            attempt++
-            continue
-          }
-          if (attempt < 2) {
-            await new Promise((resolve) => window.setTimeout(resolve, 700))
-            if (isStale()) return
-            attempt++
-            continue
-          }
-          throw error
-        }
-      } catch (e) {
-        if (isStale()) return
-        if (isAbortLikeError(e)) return
-        setLoadError(getErrorMessage(e, 'No se pudo cargar'))
-      } finally {
-        if (isStale()) return
-        setLoading(false)
-        loadInFlight.current = false
-        loadAbort.current = null
-      }
+      if (error) throw error
+      setItems((data as Order[]) ?? [])
+    } catch (e) {
+      setLoadError(getErrorMessage(e, 'No se pudo cargar'))
+    } finally {
+      setLoading(false)
+      loadInFlight.current = false
     }
   }, [])
 
-  useEffect(() => {
-    void load()
-  }, [load])
-
-  useEffect(() => {
-    const onVisible = () => {
-      if (document.visibilityState !== 'visible') {
-        resetLoad()
-        return
-      }
-      resetLoad()
-      window.setTimeout(() => void load(), 0)
-    }
-    const onOnline = () => {
-      if (document.visibilityState === 'visible') void load()
-    }
-    const onFocus = () => {
-      if (document.visibilityState !== 'visible') return
-      resetLoad()
-      window.setTimeout(() => void load(), 0)
-    }
-    document.addEventListener('visibilitychange', onVisible)
-    window.addEventListener('online', onOnline)
-    window.addEventListener('focus', onFocus)
-    return () => {
-      document.removeEventListener('visibilitychange', onVisible)
-      window.removeEventListener('online', onOnline)
-      window.removeEventListener('focus', onFocus)
-    }
-  }, [load])
-
-  useEffect(() => {
-    let t: number | undefined
-    const channel = supabase
-      .channel('admin-orders')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => {
-        if (document.visibilityState !== 'visible') return
-        if (t) window.clearTimeout(t)
-        t = window.setTimeout(() => void load(), 300)
-      })
-      .subscribe()
-
-    return () => {
-      if (t) window.clearTimeout(t)
-      void supabase.removeChannel(channel)
-    }
-  }, [load])
+  useAutoRefresh(load, { channel: 'admin-orders', table: 'orders' })
 
   useEffect(() => {
     if (!openId) {
