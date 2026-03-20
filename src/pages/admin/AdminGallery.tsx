@@ -1,16 +1,18 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Plus, Trash2 } from 'lucide-react'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { supabase } from '@/lib/supabase'
+import { withTimeout } from '@/lib/timeout'
+import { getEnv } from '@/lib/env'
 import type { GalleryWork } from '@/types'
 import { getPublicStorageUrl } from '@/lib/storage'
+import { useAuthStore } from '@/stores/authStore'
 import { GalleryEditorModal } from '@/pages/admin/GalleryEditorModal'
-import { getErrorMessage } from '@/lib/error'
-import { isAbortLikeError } from '@/lib/abort'
-import { loadWithSessionRetry } from '@/lib/load'
-import { useAutoRefresh } from '@/hooks/useAutoRefresh'
+
+const supabaseUrl = getEnv('VITE_SUPABASE_URL')
+const supabaseAnonKey = getEnv('VITE_SUPABASE_ANON_KEY')
 
 export default function AdminGallery() {
   const [loading, setLoading] = useState(true)
@@ -18,60 +20,46 @@ export default function AdminGallery() {
   const [items, setItems] = useState<GalleryWork[]>([])
   const [open, setOpen] = useState(false)
   const [workId, setWorkId] = useState<string | null>(null)
-  const loadAbort = useRef<AbortController | null>(null)
-  const loadInFlight = useRef(false)
-  const resetLoad = useCallback(() => {
-    loadAbort.current?.abort()
-    loadAbort.current = null
-    loadInFlight.current = false
-    setLoading(false)
-  }, [])
 
   const load = useCallback(async () => {
-    if (loadInFlight.current) return
-
-    const controller = new AbortController()
-    loadAbort.current?.abort()
-    loadAbort.current = controller
-    loadInFlight.current = true
     setLoading(true)
     setLoadError(null)
-
     try {
-      const { data, error } = await loadWithSessionRetry(
-        (signal) =>
-          supabase.from('gallery_works').select('*').order('created_at', { ascending: false }).limit(200).abortSignal(signal),
-        { signal: controller.signal }
+      const accessToken = useAuthStore.getState().session?.access_token
+      if (!accessToken) throw new Error('No access token')
+      const params = new URLSearchParams({
+        select: '*',
+        order: 'created_at.desc',
+        limit: '200',
+      })
+      const response = await withTimeout(
+        fetch(`${supabaseUrl}/rest/v1/gallery_works?${params.toString()}`, {
+          headers: {
+            apikey: supabaseAnonKey,
+            Authorization: `Bearer ${accessToken}`,
+          },
+        }),
+        12000,
+        'Tiempo de espera agotado al cargar galería'
       )
-
-      if (error) throw error
-      setItems((data as GalleryWork[]) ?? [])
-    } catch (e) {
-      if (isAbortLikeError(e)) return
-      setLoadError(getErrorMessage(e, 'No se pudo cargar'))
+      if (!response.ok) throw new Error(`gallery_works: ${response.status}`)
+      const data = (await response.json()) as GalleryWork[]
+      setItems(data ?? [])
+    } catch {
+      setLoadError('No se pudo cargar. Intentá con Actualizar.')
     } finally {
-      if (loadAbort.current === controller) loadAbort.current = null
       setLoading(false)
-      loadInFlight.current = false
     }
   }, [])
 
-  useAutoRefresh(load, { onHidden: resetLoad, realtime: { channel: 'admin-gallery-works', table: 'gallery_works' } })
-
-  const openCreate = () => {
-    setWorkId(null)
-    setOpen(true)
-  }
-
-  const openEdit = async (work: GalleryWork) => {
-    setWorkId(work.id)
-    setOpen(true)
-  }
+  useEffect(() => {
+    void load()
+  }, [load])
 
   const removeWork = async (id: string) => {
     if (!confirm('Eliminar trabajo?')) return
     await supabase.from('gallery_works').delete().eq('id', id)
-    await load()
+    void load()
   }
 
   return (
@@ -82,35 +70,23 @@ export default function AdminGallery() {
           <div className="mt-1 text-sm text-text-secondary">Gestioná trabajos e imágenes.</div>
         </div>
         <div className="flex items-center gap-2">
-          <Button size="sm" variant="secondary" onClick={() => void load()} disabled={loading}>
-            Actualizar
-          </Button>
-          <Button onClick={openCreate}>
-            <Plus className="h-4 w-4" />
-            Nuevo trabajo
+          <Button size="sm" variant="secondary" onClick={() => void load()} disabled={loading}>Actualizar</Button>
+          <Button onClick={() => { setWorkId(null); setOpen(true) }}>
+            <Plus className="h-4 w-4" />Nuevo trabajo
           </Button>
         </div>
       </div>
 
       {loading && items.length === 0 ? <div className="h-72 animate-pulse rounded-xl border border-white/10 bg-white/5" /> : null}
       {loading && items.length > 0 ? <div className="text-xs text-text-secondary">Actualizando galería…</div> : null}
-
-      {!loading && loadError ? (
-        <div className="rounded-xl border border-danger/40 bg-danger/10 p-3 text-sm text-danger">{loadError}</div>
-      ) : null}
+      {!loading && loadError ? <div className="rounded-xl border border-danger/40 bg-danger/10 p-3 text-sm text-danger">{loadError}</div> : null}
 
       {!loadError && (!loading || items.length > 0) ? (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {items.map((w) => (
             <Card key={w.id} className="overflow-hidden">
               <div className="aspect-[4/3] bg-black/30">
-                <img
-                  src={getPublicStorageUrl('gallery', w.cover_image_url)}
-                  alt={w.title ?? 'Trabajo'}
-                  className="h-full w-full object-cover"
-                  loading="lazy"
-                  decoding="async"
-                />
+                <img src={getPublicStorageUrl('gallery', w.cover_image_url)} alt={w.title ?? 'Trabajo'} className="h-full w-full object-cover" loading="lazy" decoding="async" />
               </div>
               <div className="grid gap-2 p-4">
                 <div className="flex items-start justify-between gap-2">
@@ -124,12 +100,8 @@ export default function AdminGallery() {
                   </div>
                 </div>
                 <div className="flex items-center justify-between gap-2">
-                  <Button size="sm" variant="secondary" onClick={() => void openEdit(w)}>
-                    Editar
-                  </Button>
-                  <Button size="sm" variant="danger" onClick={() => void removeWork(w.id)}>
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+                  <Button size="sm" variant="secondary" onClick={() => { setWorkId(w.id); setOpen(true) }}>Editar</Button>
+                  <Button size="sm" variant="danger" onClick={() => void removeWork(w.id)}><Trash2 className="h-4 w-4" /></Button>
                 </div>
               </div>
             </Card>
@@ -137,12 +109,7 @@ export default function AdminGallery() {
         </div>
       ) : null}
 
-      <GalleryEditorModal
-        open={open}
-        workId={workId}
-        onClose={() => setOpen(false)}
-        onSaved={() => void load()}
-      />
+      <GalleryEditorModal open={open} workId={workId} onClose={() => setOpen(false)} onSaved={() => void load()} />
     </div>
   )
 }

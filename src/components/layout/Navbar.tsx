@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { Bell, LogOut, Shield } from 'lucide-react'
 import { Logo } from '@/components/Logo'
@@ -36,69 +36,59 @@ export function Navbar() {
   const [notificationsLoading, setNotificationsLoading] = useState(false)
   const [notifications, setNotifications] = useState<Notification[]>([])
   const notifRef = useRef<HTMLDivElement | null>(null)
+  const userId = user?.id
 
   const isAdmin = !!profile?.is_admin
   const showShellLinks = !pathname.startsWith('/admin')
 
-  const loadUnread = useMemo(() => {
-    return async () => {
-      if (!user) {
-        setUnread(0)
-        return
-      }
-      const { count, error } = await supabase
-        .from('notifications')
-        .select('id', { count: 'exact', head: true })
-        .eq('user_id', user.id)
-        .is('read_at', null)
-      if (error) return
-      setUnread(count ?? 0)
-    }
-  }, [user])
+  const loadUnread = useCallback(async () => {
+    if (!userId) { setUnread(0); return }
+    const { count, error } = await supabase
+      .from('notifications')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', userId)
+      .is('read_at', null)
+    if (error) return
+    setUnread(count ?? 0)
+  }, [userId])
 
   useEffect(() => {
     void loadUnread()
   }, [loadUnread])
 
-  const loadNotifications = useMemo(() => {
-    return async () => {
-      if (!user) {
-        setNotifications([])
-        return
-      }
-      setNotificationsLoading(true)
-      try {
-        const { data, error } = await supabase
-          .from('notifications')
-          .select('*')
-          .eq('user_id', user.id)
-          .order('created_at', { ascending: false })
-          .limit(10)
-        if (error) return
-        const list = (data as Notification[]) ?? []
-        setNotifications(list)
-        setUnread(list.filter((x) => !x.read_at).length)
-      } finally {
-        setNotificationsLoading(false)
-      }
+  const loadNotifications = useCallback(async () => {
+    if (!userId) { setNotifications([]); return }
+    setNotificationsLoading(true)
+    try {
+      const { data, error } = await supabase
+        .from('notifications')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+        .limit(10)
+      if (error) return
+      const list = (data as Notification[]) ?? []
+      setNotifications(list)
+      setUnread(list.filter((x) => !x.read_at).length)
+    } finally {
+      setNotificationsLoading(false)
     }
-  }, [user])
+  }, [userId])
 
   useEffect(() => {
-    if (!user) {
+    if (!userId) {
       setOpenNotifications(false)
       setNotifications([])
       return
     }
     if (openNotifications) void loadNotifications()
-  }, [openNotifications, loadNotifications, user])
+  }, [openNotifications, loadNotifications, userId])
 
   useEffect(() => {
     if (!openNotifications) return
     const onMouseDown = (e: MouseEvent) => {
       const target = e.target as Node | null
-      if (!target) return
-      if (!notifRef.current) return
+      if (!target || !notifRef.current) return
       if (!notifRef.current.contains(target)) setOpenNotifications(false)
     }
     const onKeyDown = (e: KeyboardEvent) => {
@@ -113,7 +103,7 @@ export function Navbar() {
   }, [openNotifications])
 
   const markRead = async (id: string) => {
-    if (!user) return
+    if (!userId) return
     const now = new Date().toISOString()
     setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, read_at: now } : n)))
     setUnread((prev) => (prev > 0 ? prev - 1 : 0))
@@ -212,9 +202,7 @@ export function Navbar() {
           ) : (
             <div className="flex items-center gap-2">
               <Link to="/login">
-                <Button variant="secondary" size="sm">
-                  Entrar
-                </Button>
+                <Button variant="secondary" size="sm">Entrar</Button>
               </Link>
               <Link to="/registro" className="hidden sm:block">
                 <Button size="sm">Crear cuenta</Button>

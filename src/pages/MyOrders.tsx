@@ -1,39 +1,85 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { supabase } from '@/lib/supabase'
+import { withTimeout } from '@/lib/timeout'
+import { getEnv } from '@/lib/env'
 import { formatDateShort, formatMoneyARS } from '@/lib/format'
 import { getStatusTone } from '@/lib/status'
 import type { Notification, Order, QuoteRequest } from '@/types'
 import { useAuthStore } from '@/stores/authStore'
-import { getErrorMessage } from '@/lib/error'
-import { isAbortLikeError } from '@/lib/abort'
-import { loadWithSessionRetry } from '@/lib/load'
-import { useAutoRefresh } from '@/hooks/useAutoRefresh'
 
 type Tab = 'pedidos' | 'notificaciones'
+const supabaseUrl = getEnv('VITE_SUPABASE_URL')
+const supabaseAnonKey = getEnv('VITE_SUPABASE_ANON_KEY')
 
 export default function MyOrders() {
-  const auth = useAuthStore()
-  const init = useAuthStore((s) => s.init)
-  const user = auth.user
+  const initDone = useAuthStore((s) => s.initDone)
   const [tab, setTab] = useState<Tab>('pedidos')
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [quotes, setQuotes] = useState<QuoteRequest[]>([])
   const [orders, setOrders] = useState<Order[]>([])
   const [notifications, setNotifications] = useState<Notification[]>([])
-  const loadAbort = useRef<AbortController | null>(null)
-  const loadInFlight = useRef(false)
 
-  const resetLoad = useCallback(() => {
-    loadAbort.current?.abort()
-    loadAbort.current = null
-    loadInFlight.current = false
-    setLoading(false)
+  const load = useCallback(async () => {
+    const user = useAuthStore.getState().user
+    if (!user) {
+      setQuotes([])
+      setOrders([])
+      setNotifications([])
+      setLoadError(null)
+      setLoading(false)
+      return
+    }
+
+    setLoading(true)
+    setLoadError(null)
+
+    try {
+      const accessToken = useAuthStore.getState().session?.access_token
+      if (!accessToken) {
+        setLoadError('Sesión expirada. Ingresá nuevamente.')
+        return
+      }
+      const fetchList = async <T,>(table: string, timeoutMs: number, timeoutMessage: string) => {
+        const url = `${supabaseUrl}/rest/v1/${table}?select=*&user_id=eq.${user.id}&order=created_at.desc`
+        const response = await withTimeout(
+          fetch(url, {
+            method: 'GET',
+            headers: {
+              apikey: supabaseAnonKey,
+              Authorization: `Bearer ${accessToken}`,
+            },
+          }),
+          timeoutMs,
+          timeoutMessage
+        )
+        if (!response.ok) {
+          throw new Error(`${table}: ${response.status}`)
+        }
+        return (await response.json()) as T[]
+      }
+
+      const qData = await fetchList<QuoteRequest>('quote_requests', 7000, 'Tiempo de espera agotado al cargar cotizaciones')
+      const oData = await fetchList<Order>('orders', 7000, 'Tiempo de espera agotado al cargar órdenes')
+      const nData = await fetchList<Notification>('notifications', 7000, 'Tiempo de espera agotado al cargar notificaciones')
+      setQuotes(qData)
+      setOrders(oData)
+      setNotifications(nData)
+    } catch {
+      setLoadError('No se pudo cargar. Intentá con Actualizar.')
+    } finally {
+      setLoading(false)
+    }
   }, [])
+
+  useEffect(() => {
+    if (!initDone) return
+    void load()
+  }, [initDone, load])
 
   const unifiedRequests = useMemo(() => {
     const list = quotes.map((q) => {
@@ -50,10 +96,12 @@ export default function MyOrders() {
       }
     })
 
-    const standaloneOrders = orders.filter((o) => !o.quote_request_id || !quotes.some((q) => q.id === o.quote_request_id))
+    const standaloneOrders = orders.filter(
+      (o) => !o.quote_request_id || !quotes.some((q) => q.id === o.quote_request_id)
+    )
     for (const o of standaloneOrders) {
       list.push({
-        id: o.id, // Using order ID as fallback, but won't be clickable to quote detail
+        id: o.id,
         created_at: o.created_at,
         status: o.status,
         payment_status: null,
@@ -66,61 +114,6 @@ export default function MyOrders() {
 
     return list.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
   }, [quotes, orders])
-
-  const load = useCallback(async () => {
-    if (loadInFlight.current) return
-
-    if (!user?.id) {
-      resetLoad()
-      setQuotes([])
-      setOrders([])
-      setNotifications([])
-      return
-    }
-
-    const controller = new AbortController()
-    loadAbort.current?.abort()
-    loadAbort.current = controller
-    loadInFlight.current = true
-    setLoading(true)
-    setLoadError(null)
-
-    try {
-      const result = await loadWithSessionRetry((signal) =>
-        Promise.all([
-          supabase.from('quote_requests').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).abortSignal(signal),
-          supabase.from('orders').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).abortSignal(signal),
-          supabase.from('notifications').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).abortSignal(signal),
-        ]).then(([quotesResult, ordersResult, notificationsResult]) => ({
-          data: [quotesResult.data, ordersResult.data, notificationsResult.data] as const,
-          error: quotesResult.error ?? ordersResult.error ?? notificationsResult.error,
-        })),
-        { signal: controller.signal }
-      )
-
-      const anyError = result.error
-      if (anyError) throw anyError
-
-      const [q, o, n] = result.data ?? [[], [], []]
-
-      setQuotes((q as QuoteRequest[]) ?? [])
-      setOrders((o as Order[]) ?? [])
-      setNotifications((n as Notification[]) ?? [])
-    } catch (e) {
-      if (isAbortLikeError(e)) return
-      setLoadError(getErrorMessage(e, 'No se pudo cargar'))
-    } finally {
-      if (loadAbort.current === controller) loadAbort.current = null
-      setLoading(false)
-      loadInFlight.current = false
-    }
-  }, [resetLoad, user?.id])
-
-  useEffect(() => {
-    void init()
-  }, [init])
-
-  useAutoRefresh(load, { onHidden: resetLoad })
 
   const unread = notifications.filter((x) => !x.read_at).length
 

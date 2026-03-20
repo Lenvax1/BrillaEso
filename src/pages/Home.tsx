@@ -1,71 +1,51 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowRight, Sparkles } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { GalleryCard } from '@/components/gallery/GalleryCard'
-import { supabase } from '@/lib/supabase'
+import { withTimeout } from '@/lib/timeout'
+import { getEnv } from '@/lib/env'
 import type { GalleryWork } from '@/types'
-import { getErrorMessage } from '@/lib/error'
-import { isAbortLikeError } from '@/lib/abort'
-import { loadWithSessionRetry } from '@/lib/load'
-import { useAutoRefresh } from '@/hooks/useAutoRefresh'
+
+const supabaseUrl = getEnv('VITE_SUPABASE_URL')
+const supabaseAnonKey = getEnv('VITE_SUPABASE_ANON_KEY')
 
 export default function Home() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [works, setWorks] = useState<GalleryWork[]>([])
-  const loadAbort = useRef<AbortController | null>(null)
-  const loadInFlight = useRef(false)
-
-  const resetLoad = useCallback(() => {
-    loadAbort.current?.abort()
-    loadAbort.current = null
-    loadInFlight.current = false
-    setLoading(false)
-  }, [])
 
   const load = useCallback(async () => {
-    if (loadInFlight.current) return
-
-    const controller = new AbortController()
-    loadAbort.current?.abort()
-    loadAbort.current = controller
-    loadInFlight.current = true
     setLoading(true)
     setError(null)
-
     try {
-      const { data, error } = await loadWithSessionRetry(
-        (signal) =>
-          supabase
-            .from('gallery_works')
-            .select('*')
-            .eq('is_published', true)
-            .order('is_featured', { ascending: false })
-            .order('created_at', { ascending: false })
-            .limit(60)
-            .abortSignal(signal),
-        {
-          signal: controller.signal,
-          queryTimeoutMessage: 'La galería está tardando demasiado en cargar. Reintentá.',
-        }
+      const params = new URLSearchParams({
+        select: '*',
+        is_published: 'eq.true',
+        order: 'is_featured.desc,created_at.desc',
+        limit: '60',
+      })
+      const response = await withTimeout(
+        fetch(`${supabaseUrl}/rest/v1/gallery_works?${params.toString()}`, {
+          headers: { apikey: supabaseAnonKey },
+        }),
+        12000,
+        'Tiempo de espera agotado al cargar galería'
       )
-
-      if (error) throw error
-      setWorks((data as GalleryWork[]) ?? [])
-    } catch (e) {
-      if (isAbortLikeError(e)) return
-      setError(getErrorMessage(e, 'No se pudo cargar la galería'))
-      setWorks([])
+      if (!response.ok) throw new Error(`gallery_works: ${response.status}`)
+      const data = (await response.json()) as GalleryWork[]
+      setWorks(data ?? [])
+    } catch {
+      setError('No se pudo cargar la galería')
     } finally {
-      if (loadAbort.current === controller) loadAbort.current = null
       setLoading(false)
-      loadInFlight.current = false
     }
   }, [])
 
-  useAutoRefresh(load, { onHidden: resetLoad })
+  useEffect(() => {
+    void load()
+  }, [load])
 
   return (
     <div className="flex flex-col gap-10">
@@ -83,9 +63,7 @@ export default function Home() {
           </p>
           <div className="mt-6 flex flex-col gap-3 sm:flex-row">
             <Link to="/personalizar">
-              <Button>
-                Personalizar y cotizar <ArrowRight className="h-4 w-4" />
-              </Button>
+              <Button>Personalizar y cotizar <ArrowRight className="h-4 w-4" /></Button>
             </Link>
             <Link to="#galeria">
               <Button variant="secondary">Ver galería</Button>
@@ -94,9 +72,7 @@ export default function Home() {
         </div>
         <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
           <img
-            src={
-              'https://coreva-normal.trae.ai/api/ide/v1/text_to_image?prompt=neon%20sign%20wall%20art%2C%20dark%20studio%20background%2C%20glowing%20green%20and%20purple%20neon%2C%20minimal%20premium%20product%20photography%2C%20soft%20fog%2C%20high%20contrast%2C%20sharp%20details%2C%20center%20composition&image_size=landscape_16_9'
-            }
+            src="https://coreva-normal.trae.ai/api/ide/v1/text_to_image?prompt=neon%20sign%20wall%20art%2C%20dark%20studio%20background%2C%20glowing%20green%20and%20purple%20neon%2C%20minimal%20premium%20product%20photography%2C%20soft%20fog%2C%20high%20contrast%2C%20sharp%20details%2C%20center%20composition&image_size=landscape_16_9"
             alt="Mockup"
             className="aspect-video w-full rounded-xl object-cover"
             loading="lazy"
@@ -115,7 +91,7 @@ export default function Home() {
         </Card>
         <Card className="p-5">
           <div className="text-sm font-semibold text-text-primary">3) Producción y entrega</div>
-          <div className="mt-2 text-sm text-text-secondary">Seguimiento por estados desde “Mis pedidos”.</div>
+          <div className="mt-2 text-sm text-text-secondary">Seguimiento por estados desde "Mis pedidos".</div>
         </Card>
       </section>
 
@@ -126,12 +102,9 @@ export default function Home() {
             <div className="mt-1 text-sm text-text-secondary">Inspirate con trabajos reales.</div>
           </div>
           <Link to="/personalizar" className="hidden sm:block">
-            <Button variant="secondary" size="sm">
-              Cotizá el tuyo
-            </Button>
+            <Button variant="secondary" size="sm">Cotizá el tuyo</Button>
           </Link>
         </div>
-
         {loading ? (
           <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {Array.from({ length: 6 }).map((_, i) => (
@@ -144,7 +117,7 @@ export default function Home() {
           </div>
         ) : works.length === 0 ? (
           <div className="mt-6 rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-text-secondary">
-            Todavía no hay trabajos publicados. Entrá al panel admin para cargar la galería.
+            Todavía no hay trabajos publicados.
           </div>
         ) : (
           <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

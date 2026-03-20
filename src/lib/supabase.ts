@@ -1,31 +1,29 @@
 import { createClient } from '@supabase/supabase-js'
 import { getEnv } from '@/lib/env'
 
-const DEFAULT_FETCH_TIMEOUT_MS = 45_000
+const SUPABASE_FETCH_TIMEOUT_MS = 12000
 
-function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit) {
+const timedFetch: typeof fetch = async (input, init) => {
   const controller = new AbortController()
-  const timeoutSignal =
-    typeof AbortSignal !== 'undefined' && 'timeout' in AbortSignal
-      ? (AbortSignal as unknown as { timeout: (ms: number) => AbortSignal }).timeout(DEFAULT_FETCH_TIMEOUT_MS)
-      : null
+  const externalSignal = init?.signal
 
-  const t = timeoutSignal ? null : window.setTimeout(() => controller.abort(), DEFAULT_FETCH_TIMEOUT_MS)
-
-  const upstreamSignal = init?.signal
-  if (upstreamSignal) {
-    if (upstreamSignal.aborted) controller.abort()
-    else upstreamSignal.addEventListener('abort', () => controller.abort(), { once: true })
+  if (externalSignal?.aborted) {
+    throw new DOMException('Aborted', 'AbortError')
   }
 
-  if (timeoutSignal) {
-    if (timeoutSignal.aborted) controller.abort()
-    else timeoutSignal.addEventListener('abort', () => controller.abort(), { once: true })
-  }
+  const timeoutId = window.setTimeout(() => {
+    controller.abort()
+  }, SUPABASE_FETCH_TIMEOUT_MS)
 
-  return fetch(input, { ...init, signal: controller.signal }).finally(() => {
-    if (t) window.clearTimeout(t)
-  })
+  const onExternalAbort = () => controller.abort()
+  externalSignal?.addEventListener('abort', onExternalAbort)
+
+  try {
+    return await fetch(input, { ...init, signal: controller.signal })
+  } finally {
+    window.clearTimeout(timeoutId)
+    externalSignal?.removeEventListener('abort', onExternalAbort)
+  }
 }
 
 export const supabase = createClient(
@@ -33,12 +31,15 @@ export const supabase = createClient(
   getEnv('VITE_SUPABASE_ANON_KEY'),
   {
     global: {
-      fetch: fetchWithTimeout,
+      fetch: timedFetch,
     },
     auth: {
       persistSession: true,
       autoRefreshToken: true,
       detectSessionInUrl: true,
+      lock: async (name, acquireTimeout, fn) => {
+        return fn()
+      },
     },
   }
 )

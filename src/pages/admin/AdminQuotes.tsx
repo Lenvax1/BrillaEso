@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
@@ -6,16 +6,17 @@ import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
 import { supabase } from '@/lib/supabase'
+import { withTimeout } from '@/lib/timeout'
+import { getEnv } from '@/lib/env'
 import type { QuoteRequest } from '@/types'
 import { formatDateShort, formatMoneyARS } from '@/lib/format'
 import { getStatusTone } from '@/lib/status'
 import { getSignedStorageUrl } from '@/lib/storage'
-import { getErrorMessage } from '@/lib/error'
-import { isAbortLikeError } from '@/lib/abort'
-import { loadWithSessionRetry } from '@/lib/load'
-import { useAutoRefresh } from '@/hooks/useAutoRefresh'
+import { useAuthStore } from '@/stores/authStore'
 
 const QUOTE_STATUS_ALLOWED = 'Cotizado'
+const supabaseUrl = getEnv('VITE_SUPABASE_URL')
+const supabaseAnonKey = getEnv('VITE_SUPABASE_ANON_KEY')
 type ParsedSpecs = {
   measures?: { widthCm?: number; heightCm?: number }
   style?: { colors?: string; background?: string }
@@ -39,53 +40,24 @@ function ModalContent({ detail }: { detail: QuoteRequest | null }) {
 
   useEffect(() => {
     if (!detail) {
-      setDetailImg('')
-      setHasOrder(false)
-      setPrice('')
-      setStatus('En revisión')
-      setNote('')
-      setPreviewImgFile(null)
-      setPreviewImgUrl('')
+      setDetailImg(''); setHasOrder(false); setPrice(''); setStatus('En revisión')
+      setNote(''); setPreviewImgFile(null); setPreviewImgUrl('')
       return
     }
-
     setPrice(detail.quoted_price != null ? String(detail.quoted_price) : '')
     setStatus(detail.status ?? 'En revisión')
-    setNote('')
-    setPreviewImgFile(null)
-    setPreviewImgUrl('')
+    setNote(''); setPreviewImgFile(null); setPreviewImgUrl('')
 
     if (detail.reference_image_url) {
-      void (async () => {
-        try {
-          const signed = await getSignedStorageUrl('references', detail.reference_image_url)
-          setDetailImg(signed)
-        } catch {
-          setDetailImg('')
-        }
-      })()
+      void getSignedStorageUrl('references', detail.reference_image_url).then(setDetailImg).catch(() => setDetailImg(''))
     } else {
       setDetailImg('')
     }
-
     if (detail.preview_image_url) {
-      void (async () => {
-        try {
-          const signed = await getSignedStorageUrl('previews', detail.preview_image_url)
-          setPreviewImgUrl(signed)
-        } catch {
-          setPreviewImgUrl('')
-        }
-      })()
+      void getSignedStorageUrl('previews', detail.preview_image_url).then(setPreviewImgUrl).catch(() => setPreviewImgUrl(''))
     }
-
-    void (async () => {
-      const { count } = await supabase
-        .from('orders')
-        .select('id', { count: 'exact', head: true })
-        .eq('quote_request_id', detail.id)
-      setHasOrder((count ?? 0) > 0)
-    })()
+    void supabase.from('orders').select('id', { count: 'exact', head: true }).eq('quote_request_id', detail.id)
+      .then(({ count }) => setHasOrder((count ?? 0) > 0))
   }, [detail])
 
   if (!detail) return <div className="p-4 text-sm text-text-secondary">Cargando...</div>
@@ -93,45 +65,30 @@ function ModalContent({ detail }: { detail: QuoteRequest | null }) {
   const save = async () => {
     setBusy(true)
     const numeric = price.trim() ? Number(price) : null
-    
     let previewUrl = detail.preview_image_url
+
     if (previewImgFile) {
       const fileExt = previewImgFile.name.split('.').pop()
       const newPath = `${detail.user_id}/${detail.id}.${fileExt}`
       const { error } = await supabase.storage.from('previews').upload(newPath, previewImgFile, { upsert: true })
-      if (error) {
-        console.error(error)
-      } else {
-        previewUrl = newPath
-      }
+      if (!error) previewUrl = newPath
     }
 
-    const nextStatus = detail.status === QUOTE_STATUS_ALLOWED ? QUOTE_STATUS_ALLOWED : status === QUOTE_STATUS_ALLOWED ? QUOTE_STATUS_ALLOWED : detail.status
-    
+    const nextStatus = detail.status === QUOTE_STATUS_ALLOWED ? QUOTE_STATUS_ALLOWED
+      : status === QUOTE_STATUS_ALLOWED ? QUOTE_STATUS_ALLOWED : detail.status
+
     await supabase.from('quote_requests').update({ quoted_price: numeric, status: nextStatus, preview_image_url: previewUrl }).eq('id', detail.id)
-    
-    if (note.trim()) {
-      await supabase.from('notifications').insert({
-        user_id: detail.user_id,
-        title: `Actualización de solicitud ${detail.id.slice(0, 8)}`,
-        body: note.trim(),
-        link_url: `/mis-pedidos/${detail.id}`,
-      })
-    } else {
-      await supabase.from('notifications').insert({
-        user_id: detail.user_id,
-        title: `Solicitud ${detail.id.slice(0, 8)}: ${status}`,
-        body: numeric != null ? `Presupuesto: ${formatMoneyARS(numeric)}` : `Estado actualizado: ${status}`,
-        link_url: `/mis-pedidos/${detail.id}`,
-      })
-    }
-    
-    // Forzar actualización local para UI rápida
+    await supabase.from('notifications').insert({
+      user_id: detail.user_id,
+      title: note.trim() ? `Actualización de solicitud ${detail.id.slice(0, 8)}` : `Solicitud ${detail.id.slice(0, 8)}: ${status}`,
+      body: note.trim() || (numeric != null ? `Presupuesto: ${formatMoneyARS(numeric)}` : `Estado actualizado: ${status}`),
+      link_url: `/mis-pedidos/${detail.id}`,
+    })
+
     detail.status = nextStatus
     detail.quoted_price = numeric
     detail.preview_image_url = previewUrl
     setStatus(nextStatus)
-    
     setBusy(false)
   }
 
@@ -165,7 +122,6 @@ function ModalContent({ detail }: { detail: QuoteRequest | null }) {
       body: 'Verificamos tu transferencia. Continuamos con la producción.',
       link_url: `/mis-pedidos/${detail.id}`,
     })
-    // Forzar una actualización de la cotización actual para que la UI se refresque rápido
     detail.payment_status = 'paid'
     setBusy(false)
   }
@@ -178,20 +134,13 @@ function ModalContent({ detail }: { detail: QuoteRequest | null }) {
             <>
               <img src={detailImg} alt="Referencia" className="w-full object-cover" />
               <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                <a
-                  href={detailImg}
-                  download={`referencia-${detail.id.slice(0, 8)}.jpg`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="rounded-lg bg-white/10 px-4 py-2 text-sm font-medium text-white hover:bg-white/20 backdrop-blur-sm"
-                >
+                <a href={detailImg} download={`referencia-${detail.id.slice(0, 8)}.jpg`} target="_blank" rel="noreferrer"
+                  className="rounded-lg bg-white/10 px-4 py-2 text-sm font-medium text-white hover:bg-white/20 backdrop-blur-sm">
                   Descargar Referencia
                 </a>
               </div>
             </>
-          ) : (
-            <div className="aspect-[4/3] bg-white/5" />
-          )}
+          ) : <div className="aspect-[4/3] bg-white/5" />}
         </Card>
         <Card className="p-4">
           <div className="text-sm font-semibold text-text-primary">{detail.contact_email}</div>
@@ -213,17 +162,11 @@ function ModalContent({ detail }: { detail: QuoteRequest | null }) {
             </div>
             <div className="mt-3 flex flex-wrap items-center gap-2">
               <Badge tone={getStatusTone(detail.status)}>{detail.status}</Badge>
-              <Button
-                size="sm"
-                variant="secondary"
-                disabled={busy || detail.status === QUOTE_STATUS_ALLOWED}
-                onClick={() => setStatus(QUOTE_STATUS_ALLOWED)}
-              >
+              <Button size="sm" variant="secondary" disabled={busy || detail.status === QUOTE_STATUS_ALLOWED} onClick={() => setStatus(QUOTE_STATUS_ALLOWED)}>
                 Marcar como {QUOTE_STATUS_ALLOWED}
               </Button>
             </div>
           </div>
-
           {detail.customer_decision === 'accepted' ? (
             <div className="mt-4 rounded-xl border border-white/10 bg-white/5 p-3">
               <div className="text-xs text-text-secondary">Pago por transferencia</div>
@@ -251,9 +194,7 @@ function ModalContent({ detail }: { detail: QuoteRequest | null }) {
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="rounded-xl border border-white/10 bg-white/5 p-3">
                 <div className="text-xs text-text-secondary">Medidas</div>
-                <div className="mt-2 text-sm text-text-primary">
-                  {specs.measures?.widthCm ?? '-'} cm × {specs.measures?.heightCm ?? '-'} cm
-                </div>
+                <div className="mt-2 text-sm text-text-primary">{specs.measures?.widthCm ?? '-'} cm × {specs.measures?.heightCm ?? '-'} cm</div>
               </div>
               <div className="rounded-xl border border-white/10 bg-white/5 p-3">
                 <div className="text-xs text-text-secondary">Fondo</div>
@@ -302,16 +243,12 @@ function ModalContent({ detail }: { detail: QuoteRequest | null }) {
         </div>
       </Card>
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <Link to={`/mis-pedidos/${detail.id}`} className="text-sm">
-          Abrir como cliente
-        </Link>
+        <Link to={`/mis-pedidos/${detail.id}`} className="text-sm">Abrir como cliente</Link>
         <div className="flex flex-col gap-2 sm:flex-row">
           <Button variant="secondary" onClick={() => void createOrder()} disabled={busy || hasOrder}>
             {hasOrder ? 'Pedido ya creado' : 'Crear pedido'}
           </Button>
-          <Button onClick={() => void save()} disabled={busy}>
-            Guardar y notificar
-          </Button>
+          <Button onClick={() => void save()} disabled={busy}>Guardar y notificar</Button>
         </div>
       </div>
     </div>
@@ -322,56 +259,48 @@ export default function AdminQuotes() {
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [items, setItems] = useState<QuoteRequest[]>([])
-  const loadAbort = useRef<AbortController | null>(null)
-  const loadInFlight = useRef(false)
   const [query, setQuery] = useState('')
   const [openId, setOpenId] = useState<string | null>(null)
   const [detail, setDetail] = useState<QuoteRequest | null>(null)
-  const resetLoad = useCallback(() => {
-    loadAbort.current?.abort()
-    loadAbort.current = null
-    loadInFlight.current = false
-    setLoading(false)
-  }, [])
 
   const load = useCallback(async () => {
-    if (loadInFlight.current) return
-
-    const controller = new AbortController()
-    loadAbort.current?.abort()
-    loadAbort.current = controller
-    loadInFlight.current = true
     setLoading(true)
     setLoadError(null)
-
     try {
-      const { data, error } = await loadWithSessionRetry(
-        (signal) =>
-          supabase.from('quote_requests').select('*').order('created_at', { ascending: false }).limit(200).abortSignal(signal),
-        { signal: controller.signal }
+      const accessToken = useAuthStore.getState().session?.access_token
+      if (!accessToken) throw new Error('No access token')
+      const params = new URLSearchParams({
+        select: '*',
+        order: 'created_at.desc',
+        limit: '200',
+      })
+      const response = await withTimeout(
+        fetch(`${supabaseUrl}/rest/v1/quote_requests?${params.toString()}`, {
+          headers: {
+            apikey: supabaseAnonKey,
+            Authorization: `Bearer ${accessToken}`,
+          },
+        }),
+        12000,
+        'Tiempo de espera agotado al cargar cotizaciones'
       )
-
-      if (error) throw error
-      setItems((data as QuoteRequest[]) ?? [])
-    } catch (e) {
-      if (isAbortLikeError(e)) return
-      setLoadError(getErrorMessage(e, 'No se pudo cargar'))
+      if (!response.ok) throw new Error(`quote_requests: ${response.status}`)
+      const data = (await response.json()) as QuoteRequest[]
+      setItems(data ?? [])
+    } catch {
+      setLoadError('No se pudo cargar. Intentá con Actualizar.')
     } finally {
-      if (loadAbort.current === controller) loadAbort.current = null
       setLoading(false)
-      loadInFlight.current = false
     }
   }, [])
 
-  useAutoRefresh(load, { onHidden: resetLoad, realtime: { channel: 'admin-quote-requests', table: 'quote_requests' } })
+  useEffect(() => {
+    void load()
+  }, [load])
 
   useEffect(() => {
-    if (!openId) {
-      setDetail(null)
-      return
-    }
-    const found = items.find((x) => x.id === openId) ?? null
-    setDetail(found)
+    if (!openId) { setDetail(null); return }
+    setDetail(items.find((x) => x.id === openId) ?? null)
   }, [openId, items])
 
   const filtered = items.filter((x) => {
@@ -388,22 +317,17 @@ export default function AdminQuotes() {
           <div className="mt-1 text-sm text-text-secondary">Bandeja de solicitudes y presupuestos.</div>
         </div>
         <div className="flex items-end gap-3">
-          <Button size="sm" variant="secondary" onClick={() => void load()} disabled={loading}>
-            Actualizar
-          </Button>
-        <div className="w-full max-w-sm">
-          <div className="mb-2 text-xs text-text-secondary">Buscar por email/ID</div>
-          <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="cliente@email.com" />
-        </div>
+          <Button size="sm" variant="secondary" onClick={() => void load()} disabled={loading}>Actualizar</Button>
+          <div className="w-full max-w-sm">
+            <div className="mb-2 text-xs text-text-secondary">Buscar por email/ID</div>
+            <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="cliente@email.com" />
+          </div>
         </div>
       </div>
 
       {loading && items.length === 0 ? <div className="h-72 animate-pulse rounded-xl border border-white/10 bg-white/5" /> : null}
       {loading && items.length > 0 ? <div className="text-xs text-text-secondary">Actualizando cotizaciones…</div> : null}
-
-      {!loading && loadError ? (
-        <div className="rounded-xl border border-danger/40 bg-danger/10 p-3 text-sm text-danger">{loadError}</div>
-      ) : null}
+      {!loading && loadError ? <div className="rounded-xl border border-danger/40 bg-danger/10 p-3 text-sm text-danger">{loadError}</div> : null}
 
       {!loadError && (!loading || items.length > 0) ? (
         <Card className="overflow-hidden">
@@ -428,14 +352,10 @@ export default function AdminQuotes() {
                   <div className="col-span-2 text-sm text-text-secondary">{formatDateShort(q.created_at)}</div>
                   <div className="col-span-3">
                     <Badge tone={getStatusTone(q.status)}>{q.status}</Badge>
-                    {q.quoted_price != null ? (
-                      <div className="mt-1 text-xs text-text-secondary">{formatMoneyARS(q.quoted_price)}</div>
-                    ) : null}
+                    {q.quoted_price != null ? <div className="mt-1 text-xs text-text-secondary">{formatMoneyARS(q.quoted_price)}</div> : null}
                   </div>
                   <div className="col-span-2 text-right">
-                    <Button size="sm" variant="secondary" onClick={() => setOpenId(q.id)}>
-                      Abrir
-                    </Button>
+                    <Button size="sm" variant="secondary" onClick={() => setOpenId(q.id)}>Abrir</Button>
                   </div>
                 </div>
               ))
@@ -452,11 +372,7 @@ export default function AdminQuotes() {
 }
 
 function safePrettyJson(specs: string) {
-  try {
-    return JSON.stringify(JSON.parse(specs), null, 2)
-  } catch {
-    return specs
-  }
+  try { return JSON.stringify(JSON.parse(specs), null, 2) } catch { return specs }
 }
 
 function prettyBackground(value?: string) {
@@ -471,13 +387,9 @@ function parseSpecs(specsJson: string): ParsedSpecs | null {
   try {
     const parsed = JSON.parse(specsJson) as Record<string, unknown>
     const known = new Set(['measures', 'style', 'text', 'notes'])
-    const rest = Object.entries(parsed)
-      .filter(([k]) => !known.has(k))
-      .map(([key, value]) => ({
-        key,
-        value: typeof value === 'string' ? value : JSON.stringify(value),
-      }))
-
+    const rest = Object.entries(parsed).filter(([k]) => !known.has(k)).map(([key, value]) => ({
+      key, value: typeof value === 'string' ? value : JSON.stringify(value),
+    }))
     const measuresRaw = (parsed.measures ?? null) as Record<string, unknown> | null
     const styleRaw = (parsed.style ?? null) as Record<string, unknown> | null
     return {
@@ -493,9 +405,7 @@ function parseSpecs(specsJson: string): ParsedSpecs | null {
       notes: typeof parsed.notes === 'string' ? parsed.notes : '',
       rest,
     }
-  } catch {
-    return null
-  }
+  } catch { return null }
 }
 
 function parseTransferReference(reference: string | null): { holder: string; last4: string } {
@@ -506,7 +416,5 @@ function parseTransferReference(reference: string | null): { holder: string; las
       holder: typeof parsed.holder === 'string' ? parsed.holder : '',
       last4: typeof parsed.last4 === 'string' ? parsed.last4 : '',
     }
-  } catch {
-    return { holder: reference, last4: '' }
-  }
+  } catch { return { holder: reference, last4: '' } }
 }

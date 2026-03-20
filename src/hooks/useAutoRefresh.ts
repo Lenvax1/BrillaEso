@@ -1,73 +1,65 @@
-import { useEffect } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 
 type RealtimeOptions = {
   channel: string
   table: string
   schema?: string
-  delayMs?: number
 }
 
 type AutoRefreshOptions = {
   realtime?: RealtimeOptions
-  onHidden?: () => void
 }
 
 export function useAutoRefresh(load: () => void | Promise<void>, options?: AutoRefreshOptions) {
   const realtimeChannel = options?.realtime?.channel
-  const realtimeDelayMs = options?.realtime?.delayMs
   const realtimeSchema = options?.realtime?.schema ?? 'public'
   const realtimeTable = options?.realtime?.table
-  const onHidden = options?.onHidden
+  const loadRef = useRef(load)
+  const runningRef = useRef(false)
+  const queuedRef = useRef(false)
+  loadRef.current = load
 
-  useEffect(() => {
-    void load()
-  }, [load])
-
-  useEffect(() => {
-    const refresh = () => {
-      void load()
+  const runLoad = useCallback(() => {
+    if (runningRef.current) {
+      queuedRef.current = true
+      return
     }
+    runningRef.current = true
+    Promise.resolve(loadRef.current())
+      .catch(() => null)
+      .finally(() => {
+        runningRef.current = false
+        if (!queuedRef.current) return
+        queuedRef.current = false
+        if (document.visibilityState === 'visible') runLoad()
+      })
+  }, [])
 
+  useEffect(() => {
+    if (document.visibilityState === 'visible') runLoad()
+  }, [runLoad])
+
+  useEffect(() => {
     const onVisible = () => {
-      if (document.visibilityState !== 'visible') {
-        onHidden?.()
-        return
-      }
-
-      window.setTimeout(refresh, 0)
+      if (document.visibilityState === 'visible') runLoad()
     }
-
     document.addEventListener('visibilitychange', onVisible)
-    window.addEventListener('focus', refresh)
-    window.addEventListener('online', refresh)
-
+    window.addEventListener('online', onVisible)
     return () => {
       document.removeEventListener('visibilitychange', onVisible)
-      window.removeEventListener('focus', refresh)
-      window.removeEventListener('online', refresh)
+      window.removeEventListener('online', onVisible)
     }
-  }, [load, onHidden])
+  }, [runLoad])
 
   useEffect(() => {
     if (!realtimeChannel || !realtimeTable) return
-
-    let timeoutId: number | undefined
-    const scheduleRefresh = () => {
-      if (timeoutId) window.clearTimeout(timeoutId)
-      timeoutId = window.setTimeout(() => {
-        void load()
-      }, realtimeDelayMs ?? 300)
-    }
-
     const channel = supabase
       .channel(realtimeChannel)
-      .on('postgres_changes', { event: '*', schema: realtimeSchema, table: realtimeTable }, scheduleRefresh)
+      .on('postgres_changes', { event: '*', schema: realtimeSchema, table: realtimeTable }, () => {
+        if (document.visibilityState === 'visible') runLoad()
+      })
       .subscribe()
-
-    return () => {
-      if (timeoutId) window.clearTimeout(timeoutId)
-      void supabase.removeChannel(channel)
-    }
-  }, [load, realtimeChannel, realtimeDelayMs, realtimeSchema, realtimeTable])
+    return () => { void supabase.removeChannel(channel) }
+  }, [realtimeChannel, realtimeSchema, realtimeTable, runLoad])
 }
