@@ -18,12 +18,14 @@ export async function loadWithSessionRetry<T>(
     message.includes('invalid token') ||
     message.includes('token expired') ||
     message.includes('not authenticated') ||
+    message.includes('not_authenticated') ||
     message.includes('session expired') ||
     message.includes('unauthorized') ||
     /\bauth\b/.test(message)
 
   if (isAuthError) {
-    await supabase.auth.refreshSession().catch(() => null)
+    const { error: refreshError } = await supabase.auth.refreshSession()
+    if (refreshError) return result
     return runQuery()
   }
 
