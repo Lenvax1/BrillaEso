@@ -43,6 +43,10 @@ export default function Register() {
   }
 
   const onGoogleSignIn = async () => {
+    if (!accepted) {
+      setError('Debés aceptar los términos para continuar.')
+      return
+    }
     setError(null)
     setNotice(null)
     try {
@@ -85,7 +89,7 @@ export default function Register() {
             <div className="text-xs text-text-secondary">o</div>
             <div className="h-px flex-1 bg-white/10" />
           </div>
-          <Button variant="secondary" onClick={() => void onGoogleSignIn()} disabled={auth.loading} icon={<GoogleIcon />}>
+          <Button variant="secondary" onClick={() => void onGoogleSignIn()} disabled={auth.loading || !accepted} icon={<GoogleIcon />}>
             Continuar con Google
           </Button>
           <div className="text-sm text-text-secondary">

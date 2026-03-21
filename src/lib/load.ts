@@ -13,7 +13,14 @@ export async function loadWithSessionRetry<T>(
   if (!result.error) return result
 
   const message = String(result.error?.message ?? '').toLowerCase()
-  const isAuthError = message.includes('jwt') || message.includes('auth')
+  const isAuthError =
+    message.includes('jwt') ||
+    message.includes('invalid token') ||
+    message.includes('token expired') ||
+    message.includes('not authenticated') ||
+    message.includes('session expired') ||
+    message.includes('unauthorized') ||
+    /\bauth\b/.test(message)
 
   if (isAuthError) {
     await supabase.auth.refreshSession().catch(() => null)

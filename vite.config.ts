@@ -3,11 +3,15 @@ import react from '@vitejs/plugin-react'
 import tsconfigPaths from "vite-tsconfig-paths";
 import { traeBadgePlugin } from 'vite-plugin-trae-solo-badge';
 
+const allowedHosts = process.env.VITE_ALLOWED_HOSTS
+  ? process.env.VITE_ALLOWED_HOSTS.split(',').map((host) => host.trim()).filter(Boolean)
+  : ['localhost', '127.0.0.1', '.trycloudflare.com']
+
 export default defineConfig({
   appType: 'spa',
   server: {
     host: true,
-    allowedHosts: ['walking-cant-trace-never.trycloudflare.com']
+    allowedHosts
   },
   build: {
     sourcemap: 'hidden',

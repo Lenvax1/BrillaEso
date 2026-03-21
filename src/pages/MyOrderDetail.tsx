@@ -31,7 +31,6 @@ export default function MyOrderDetail() {
   const [pay, setPay] = useState<PaymentSettings | null>(null)
   const [transferHolder, setTransferHolder] = useState<string>('')
   const [transferLast4, setTransferLast4] = useState<string>('')
-  const [transferSuccess, setTransferSuccess] = useState(false)
 
   const load = useMemo(() => {
     return async () => {
@@ -172,7 +171,6 @@ export default function MyOrderDetail() {
         p_reference: JSON.stringify({ holder, last4: last4 || null }),
       })
       if (error) throw error
-      setTransferSuccess(true)
       await load()
     } catch (e) {
       setActionError(e instanceof Error ? e.message : 'No se pudieron informar los datos de transferencia')
@@ -210,6 +208,7 @@ export default function MyOrderDetail() {
 
   const depositAmount = q.quoted_price != null ? q.quoted_price / 2 : null
   const remainingAmount = q.quoted_price != null ? q.quoted_price - q.quoted_price / 2 : null
+  const transferSubmitted = q.payment_status === 'pending' || !!q.payment_submitted_at
 
   return (
     <div className="grid gap-6 lg:grid-cols-2 lg:items-start">
@@ -285,7 +284,7 @@ export default function MyOrderDetail() {
                       </div>
                     </div>
 
-                    {transferSuccess ? (
+                    {transferSubmitted ? (
                       <div className="rounded-xl border border-neon-green/30 bg-neon-green/10 p-4 text-sm text-neon-green">
                         ¡Datos de transferencia enviados correctamente!
                       </div>
