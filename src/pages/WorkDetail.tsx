@@ -53,8 +53,11 @@ export default function WorkDetail() {
           'El contenido está tardando demasiado en cargar. Reintentá.'
         )
         if (!alive) return
-        if (imgErr) setError(imgErr.message)
-        setImgs((images as GalleryWorkImage[]) ?? [])
+        if (imgErr) {
+          setImgs([])
+        } else {
+          setImgs((images as GalleryWorkImage[]) ?? [])
+        }
       } catch (e) {
         if (!alive) return
         setError(getErrorMessage(e, 'No se pudo cargar el trabajo'))

@@ -23,7 +23,8 @@ export async function loadWithSessionRetry<T>(
     /\bauth\b/.test(message)
 
   if (isAuthError) {
-    await supabase.auth.refreshSession().catch(() => null)
+    const { error: refreshError } = await supabase.auth.refreshSession()
+    if (refreshError) return result
     return runQuery()
   }
 

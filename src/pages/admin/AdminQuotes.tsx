@@ -25,7 +25,7 @@ type ParsedSpecs = {
   rest: Array<{ key: string; value: string }>
 }
 
-function ModalContent({ detail }: { detail: QuoteRequest | null }) {
+function ModalContent({ detail, onUpdate }: { detail: QuoteRequest | null; onUpdate: (updated: QuoteRequest) => void }) {
   const [status, setStatus] = useState<string>('En revisión')
   const [price, setPrice] = useState<string>('')
   const [note, setNote] = useState<string>('')
@@ -85,9 +85,7 @@ function ModalContent({ detail }: { detail: QuoteRequest | null }) {
       link_url: `/mis-pedidos/${detail.id}`,
     })
 
-    detail.status = nextStatus
-    detail.quoted_price = numeric
-    detail.preview_image_url = previewUrl
+    onUpdate({ ...detail, status: nextStatus, quoted_price: numeric, preview_image_url: previewUrl })
     setStatus(nextStatus)
     setBusy(false)
   }
@@ -122,7 +120,7 @@ function ModalContent({ detail }: { detail: QuoteRequest | null }) {
       body: 'Verificamos tu transferencia. Continuamos con la producción.',
       link_url: `/mis-pedidos/${detail.id}`,
     })
-    detail.payment_status = 'paid'
+    onUpdate({ ...detail, payment_status: 'paid' })
     setBusy(false)
   }
 
@@ -365,7 +363,13 @@ export default function AdminQuotes() {
       ) : null}
 
       <Modal open={!!openId} title="Detalle de cotización" onClose={() => setOpenId(null)}>
-        <ModalContent detail={detail} />
+        <ModalContent
+          detail={detail}
+          onUpdate={(updated) => {
+            setItems((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
+            setDetail(updated)
+          }}
+        />
       </Modal>
     </div>
   )

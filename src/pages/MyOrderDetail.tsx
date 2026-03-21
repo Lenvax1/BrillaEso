@@ -46,23 +46,27 @@ export default function MyOrderDetail() {
       try {
         let qr: (QuoteRequest & { orders: Order[] }) | null = null
         for (let i = 0; i < 2; i++) {
-          const { data, error } = await withTimeout(
-            supabase.from('quote_requests').select('*, orders(*)').eq('id', id).maybeSingle(),
-            20_000,
-            'La carga está tardando demasiado. Reintentá.'
-          )
-          if (!error && data) {
-            qr = data as (QuoteRequest & { orders: Order[] })
-            break
+          try {
+            const { data, error } = await withTimeout(
+              supabase.from('quote_requests').select('*, orders(*)').eq('id', id).maybeSingle(),
+              20_000,
+              'La carga está tardando demasiado. Reintentá.'
+            )
+            if (!error && data) {
+              qr = data as (QuoteRequest & { orders: Order[] })
+              break
+            }
+            const msg = String(error?.message ?? '').toLowerCase()
+            const looksAuth = msg.includes('jwt') || msg.includes('auth')
+            if (looksAuth && i === 0) {
+              await withTimeout(supabase.auth.refreshSession(), 6_000, 'La sesión está tardando demasiado.').catch(() => null)
+              continue
+            }
+            if (error && i === 1) throw error
+          } catch (e) {
+            if (i === 0) continue
+            throw e
           }
-          const msg = String(error?.message ?? '').toLowerCase()
-          const looksAuth = msg.includes('jwt') || msg.includes('auth')
-          if (looksAuth && i === 0) {
-            await withTimeout(supabase.auth.refreshSession(), 6_000, 'La sesión está tardando demasiado.').catch(() => null)
-            continue
-          }
-          if (error) throw error
-          break
         }
         if (!qr) throw new Error('No encontrado')
         setQ(qr)
@@ -96,12 +100,16 @@ export default function MyOrderDetail() {
           setPreviewImgUrl('')
         }
 
-        const { data: ps } = await withTimeout(
-          supabase.from('payment_settings').select('*').eq('id', 'default').maybeSingle(),
-          20_000,
-          'No se pudieron cargar los datos de pago a tiempo.'
-        )
-        setPay((ps as PaymentSettings) ?? null)
+        try {
+          const { data: ps } = await withTimeout(
+            supabase.from('payment_settings').select('*').eq('id', 'default').maybeSingle(),
+            20_000,
+            'No se pudieron cargar los datos de pago a tiempo.'
+          )
+          setPay((ps as PaymentSettings) ?? null)
+        } catch {
+          setPay(null)
+        }
       } catch (e) {
         const msg = e instanceof Error ? e.message : 'No encontrado'
         setError(msg)
