@@ -50,7 +50,7 @@ export default function WorkDetail() {
             .eq('work_id', id)
             .order('sort_order', { ascending: true }),
           20_000,
-          'Las imágenes están tardando demasiado en cargar. Reintentá.'
+          'El contenido está tardando demasiado en cargar. Reintentá.'
         )
         if (!alive) return
         if (imgErr) setError(imgErr.message)
@@ -98,7 +98,10 @@ export default function WorkDetail() {
 
   return (
     <div className="grid gap-8 lg:grid-cols-2 lg:items-start">
-      <ImageCarousel images={images} alt={work.title ?? 'Trabajo'} />
+      <div>
+        <ImageCarousel images={images} alt={work.title ?? 'Trabajo'} />
+        <div className="mt-2 text-xs text-text-secondary">Tocá la foto o video para verlo en grande.</div>
+      </div>
 
       <div>
         <div className="text-2xl font-semibold text-text-primary">{work.title ?? 'Trabajo'}</div>

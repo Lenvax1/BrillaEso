@@ -5,6 +5,8 @@ import { Logo } from '@/components/Logo'
 import { Button } from '@/components/ui/Button'
 import { cn } from '@/lib/utils'
 import { supabase } from '@/lib/supabase'
+import { getEnv } from '@/lib/env'
+import { withTimeout } from '@/lib/timeout'
 import { useAuthStore } from '@/stores/authStore'
 import type { Notification } from '@/types'
 import { formatDateShort } from '@/lib/format'
@@ -26,6 +28,8 @@ function NavItem({ to, children }: { to: string; children: React.ReactNode }) {
 }
 
 export function Navbar() {
+  const supabaseUrl = getEnv('VITE_SUPABASE_URL')
+  const supabaseAnonKey = getEnv('VITE_SUPABASE_ANON_KEY')
   const { pathname } = useLocation()
   const navigate = useNavigate()
   const auth = useAuthStore()
@@ -43,14 +47,33 @@ export function Navbar() {
 
   const loadUnread = useCallback(async () => {
     if (!userId) { setUnread(0); return }
-    const { count, error } = await supabase
-      .from('notifications')
-      .select('id', { count: 'exact', head: true })
-      .eq('user_id', userId)
-      .is('read_at', null)
-    if (error) return
-    setUnread(count ?? 0)
-  }, [userId])
+    const accessToken = useAuthStore.getState().session?.access_token
+    if (!accessToken) { setUnread(0); return }
+    try {
+      const params = new URLSearchParams({
+        select: 'id',
+        user_id: `eq.${userId}`,
+        read_at: 'is.null',
+      })
+      const response = await withTimeout(
+        fetch(`${supabaseUrl}/rest/v1/notifications?${params.toString()}`, {
+          method: 'GET',
+          headers: {
+            apikey: supabaseAnonKey,
+            Authorization: `Bearer ${accessToken}`,
+            Prefer: 'count=exact',
+          },
+        }),
+        7000,
+        'Tiempo de espera agotado al contar notificaciones'
+      )
+      if (!response.ok) return
+      const total = Number(response.headers.get('content-range')?.split('/')[1] ?? '0')
+      setUnread(Number.isFinite(total) ? total : 0)
+    } catch {
+      setUnread(0)
+    }
+  }, [supabaseAnonKey, supabaseUrl, userId])
 
   useEffect(() => {
     void loadUnread()
@@ -58,22 +81,35 @@ export function Navbar() {
 
   const loadNotifications = useCallback(async () => {
     if (!userId) { setNotifications([]); return }
+    const accessToken = useAuthStore.getState().session?.access_token
+    if (!accessToken) { setNotifications([]); setUnread(0); return }
     setNotificationsLoading(true)
     try {
-      const { data, error } = await supabase
-        .from('notifications')
-        .select('*')
-        .eq('user_id', userId)
-        .order('created_at', { ascending: false })
-        .limit(10)
-      if (error) return
-      const list = (data as Notification[]) ?? []
+      const params = new URLSearchParams({
+        select: '*',
+        user_id: `eq.${userId}`,
+        order: 'created_at.desc',
+        limit: '10',
+      })
+      const response = await withTimeout(
+        fetch(`${supabaseUrl}/rest/v1/notifications?${params.toString()}`, {
+          method: 'GET',
+          headers: {
+            apikey: supabaseAnonKey,
+            Authorization: `Bearer ${accessToken}`,
+          },
+        }),
+        7000,
+        'Tiempo de espera agotado al cargar notificaciones'
+      )
+      if (!response.ok) return
+      const list = ((await response.json()) as Notification[]) ?? []
       setNotifications(list)
       setUnread(list.filter((x) => !x.read_at).length)
     } finally {
       setNotificationsLoading(false)
     }
-  }, [userId])
+  }, [supabaseAnonKey, supabaseUrl, userId])
 
   useEffect(() => {
     if (!userId) {

@@ -4,6 +4,11 @@ import tsconfigPaths from "vite-tsconfig-paths";
 import { traeBadgePlugin } from 'vite-plugin-trae-solo-badge';
 
 export default defineConfig({
+  appType: 'spa',
+  server: {
+    host: true,
+    allowedHosts: ['walking-cant-trace-never.trycloudflare.com']
+  },
   build: {
     sourcemap: 'hidden',
   },
@@ -28,6 +33,6 @@ export default defineConfig({
       autoTheme: true,
       autoThemeTarget: '#root'
     }), 
-    tsconfigPaths()
+    tsconfigPaths(),
   ],
 })

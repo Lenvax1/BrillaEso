@@ -7,7 +7,7 @@ import { supabase } from '@/lib/supabase'
 import { withTimeout } from '@/lib/timeout'
 import { getEnv } from '@/lib/env'
 import type { GalleryWork } from '@/types'
-import { getPublicStorageUrl } from '@/lib/storage'
+import { getPublicStorageUrl, isVideoMediaPath } from '@/lib/storage'
 import { useAuthStore } from '@/stores/authStore'
 import { GalleryEditorModal } from '@/pages/admin/GalleryEditorModal'
 
@@ -86,7 +86,17 @@ export default function AdminGallery() {
           {items.map((w) => (
             <Card key={w.id} className="overflow-hidden">
               <div className="aspect-[4/3] bg-black/30">
-                <img src={getPublicStorageUrl('gallery', w.cover_image_url)} alt={w.title ?? 'Trabajo'} className="h-full w-full object-cover" loading="lazy" decoding="async" />
+                {isVideoMediaPath(w.cover_image_url) ? (
+                  <video
+                    src={getPublicStorageUrl('gallery', w.cover_image_url)}
+                    className="h-full w-full object-cover"
+                    muted
+                    playsInline
+                    preload="metadata"
+                  />
+                ) : (
+                  <img src={getPublicStorageUrl('gallery', w.cover_image_url)} alt={w.title ?? 'Trabajo'} className="h-full w-full object-cover" loading="lazy" decoding="async" />
+                )}
               </div>
               <div className="grid gap-2 p-4">
                 <div className="flex items-start justify-between gap-2">

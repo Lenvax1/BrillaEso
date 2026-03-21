@@ -1,9 +1,16 @@
+import { useEffect } from 'react'
 import { Navigate, Outlet } from 'react-router-dom'
 import { useAuthStore } from '@/stores/authStore'
 import { Spinner } from '@/components/ui/Spinner'
 
 export function RequireAdmin() {
   const auth = useAuthStore()
+
+  useEffect(() => {
+    if (!auth.initDone) {
+      void auth.init()
+    }
+  }, [auth])
 
   if (auth.loading && !auth.initDone) {
     return (

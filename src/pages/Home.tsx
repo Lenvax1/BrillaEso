@@ -47,6 +47,12 @@ export default function Home() {
     void load()
   }, [load])
 
+  const scrollToGallery = () => {
+    const section = document.getElementById('galeria')
+    if (!section) return
+    section.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
   return (
     <div className="flex flex-col gap-10">
       <section className="grid gap-6 rounded-2xl border border-white/10 bg-gradient-to-b from-white/5 to-transparent p-6 md:grid-cols-2 md:items-center md:p-10">
@@ -62,12 +68,10 @@ export default function Home() {
             Subí una imagen, definí medidas y estilo, y seguí el estado desde tu cuenta. Notificaciones in-app y por email.
           </p>
           <div className="mt-6 flex flex-col gap-3 sm:flex-row">
-            <Link to="/personalizar">
-              <Button>Personalizar y cotizar <ArrowRight className="h-4 w-4" /></Button>
+            <Link to="/personalizar" className="w-full sm:w-auto">
+              <Button className="w-full sm:w-auto">Personalizar y cotizar <ArrowRight className="h-4 w-4" /></Button>
             </Link>
-            <Link to="#galeria">
-              <Button variant="secondary">Ver galería</Button>
-            </Link>
+            <Button className="w-full sm:w-auto" variant="secondary" onClick={scrollToGallery}>Ver galería</Button>
           </div>
         </div>
         <div className="rounded-2xl border border-white/10 bg-black/30 p-4">

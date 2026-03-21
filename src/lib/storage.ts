@@ -4,6 +4,12 @@ export function isHttpUrl(value: string) {
   return /^https?:\/\//i.test(value)
 }
 
+export function isVideoMediaPath(value: string) {
+  if (!value) return false
+  const clean = value.split('?')[0].split('#')[0].toLowerCase()
+  return clean.endsWith('.mp4') || clean.endsWith('.webm') || clean.endsWith('.mov')
+}
+
 function extractBucketObjectPath(bucket: string, pathOrUrl: string) {
   if (!pathOrUrl) return ''
   const normalizedBucketPrefix = `${bucket}/`
