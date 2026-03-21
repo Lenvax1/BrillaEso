@@ -4,6 +4,9 @@ import { Card } from '@/components/ui/Card'
 import { Input } from '@/components/ui/Input'
 import { Button } from '@/components/ui/Button'
 import { useAuthStore } from '@/stores/authStore'
+import { getErrorMessage } from '@/lib/error'
+
+import { GoogleIcon } from '@/components/ui/GoogleIcon'
 
 export default function Login() {
   const auth = useAuthStore()
@@ -28,7 +31,16 @@ export default function Login() {
       await auth.signIn({ email, password })
       nav(loc.state?.from ?? '/mis-pedidos', { replace: true })
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Error al iniciar sesión')
+      setError(getErrorMessage(e, 'Error al iniciar sesión'))
+    }
+  }
+
+  const onGoogleSignIn = async () => {
+    setError(null)
+    try {
+      await auth.signInWithGoogle(loc.state?.from ?? '/mis-pedidos')
+    } catch (e) {
+      setError(getErrorMessage(e, 'Error al iniciar sesión con Google'))
     }
   }
 
@@ -52,6 +64,14 @@ export default function Login() {
           ) : null}
           <Button onClick={() => void onSubmit()} disabled={!email || !password || auth.loading}>
             Entrar
+          </Button>
+          <div className="flex items-center gap-3">
+            <div className="h-px flex-1 bg-white/10" />
+            <div className="text-xs text-text-secondary">o</div>
+            <div className="h-px flex-1 bg-white/10" />
+          </div>
+          <Button variant="secondary" onClick={() => void onGoogleSignIn()} disabled={auth.loading} icon={<GoogleIcon />}>
+            Continuar con Google
           </Button>
           <div className="text-sm text-text-secondary">
             ¿No tenés cuenta? <Link to="/registro">Creá una</Link>

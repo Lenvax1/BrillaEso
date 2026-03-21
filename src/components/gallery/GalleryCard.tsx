@@ -2,22 +2,33 @@ import { Link } from 'react-router-dom'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import type { GalleryWork } from '@/types'
-import { getPublicStorageUrl } from '@/lib/storage'
+import { getPublicStorageUrl, isVideoMediaPath } from '@/lib/storage'
 
 export function GalleryCard({ work }: { work: GalleryWork }) {
   const tags = work.tags_json ? safeParseTags(work.tags_json) : []
-  const img = getPublicStorageUrl('gallery', work.cover_image_url)
+  const mediaUrl = getPublicStorageUrl('gallery', work.cover_image_url)
+  const isVideo = isVideoMediaPath(work.cover_image_url)
 
   return (
     <Link to={`/trabajos/${work.id}`} className="block">
       <Card className="group overflow-hidden transition hover:border-white/20 hover:bg-white/5">
         <div className="relative aspect-[4/3] w-full overflow-hidden bg-black/30">
-          <img
-            src={img}
-            alt={work.title ?? 'Trabajo'}
-            className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.02]"
-            loading="lazy"
-          />
+          {isVideo ? (
+            <video
+              src={mediaUrl}
+              className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.02]"
+              muted
+              playsInline
+              preload="metadata"
+            />
+          ) : (
+            <img
+              src={mediaUrl}
+              alt={work.title ?? 'Trabajo'}
+              className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.02]"
+              loading="lazy"
+            />
+          )}
           {work.is_featured ? (
             <div className="absolute left-3 top-3">
               <Badge tone="purple">Destacado</Badge>
@@ -35,7 +46,7 @@ export function GalleryCard({ work }: { work: GalleryWork }) {
               ))}
             </div>
           ) : (
-            <div className="text-xs text-text-secondary">Ver más fotos</div>
+            <div className="text-xs text-text-secondary">Ver contenido</div>
           )}
         </div>
       </Card>

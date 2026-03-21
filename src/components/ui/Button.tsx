@@ -4,9 +4,10 @@ import { cn } from '@/lib/utils'
 type Props = ButtonHTMLAttributes<HTMLButtonElement> & {
   variant?: 'primary' | 'secondary' | 'ghost' | 'danger'
   size?: 'sm' | 'md'
+  icon?: React.ReactNode
 }
 
-export function Button({ className, variant = 'primary', size = 'md', ...props }: Props) {
+export function Button({ className, variant = 'primary', size = 'md', icon, ...props }: Props) {
   return (
     <button
       className={cn(
@@ -19,7 +20,10 @@ export function Button({ className, variant = 'primary', size = 'md', ...props }
         className
       )}
       {...props}
-    />
+    >
+      {icon}
+      {props.children}
+    </button>
   )
 }
 

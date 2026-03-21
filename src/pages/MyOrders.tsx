@@ -1,43 +1,119 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { supabase } from '@/lib/supabase'
+import { withTimeout } from '@/lib/timeout'
+import { getEnv } from '@/lib/env'
 import { formatDateShort, formatMoneyARS } from '@/lib/format'
 import { getStatusTone } from '@/lib/status'
 import type { Notification, Order, QuoteRequest } from '@/types'
 import { useAuthStore } from '@/stores/authStore'
 
 type Tab = 'pedidos' | 'notificaciones'
+const supabaseUrl = getEnv('VITE_SUPABASE_URL')
+const supabaseAnonKey = getEnv('VITE_SUPABASE_ANON_KEY')
 
 export default function MyOrders() {
-  const auth = useAuthStore()
-  const user = auth.user!
+  const initDone = useAuthStore((s) => s.initDone)
   const [tab, setTab] = useState<Tab>('pedidos')
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [quotes, setQuotes] = useState<QuoteRequest[]>([])
   const [orders, setOrders] = useState<Order[]>([])
   const [notifications, setNotifications] = useState<Notification[]>([])
 
-  const load = useMemo(() => {
-    return async () => {
-      setLoading(true)
-      const [{ data: q }, { data: o }, { data: n }] = await Promise.all([
-        supabase.from('quote_requests').select('*').eq('user_id', user.id).order('created_at', { ascending: false }),
-        supabase.from('orders').select('*').eq('user_id', user.id).order('created_at', { ascending: false }),
-        supabase.from('notifications').select('*').eq('user_id', user.id).order('created_at', { ascending: false }),
-      ])
-      setQuotes((q as QuoteRequest[]) ?? [])
-      setOrders((o as Order[]) ?? [])
-      setNotifications((n as Notification[]) ?? [])
+  const load = useCallback(async () => {
+    const user = useAuthStore.getState().user
+    if (!user) {
+      setQuotes([])
+      setOrders([])
+      setNotifications([])
+      setLoadError(null)
+      setLoading(false)
+      return
+    }
+
+    setLoading(true)
+    setLoadError(null)
+
+    try {
+      const accessToken = useAuthStore.getState().session?.access_token
+      if (!accessToken) {
+        setLoadError('Sesión expirada. Ingresá nuevamente.')
+        return
+      }
+      const fetchList = async <T,>(table: string, timeoutMs: number, timeoutMessage: string) => {
+        const url = `${supabaseUrl}/rest/v1/${table}?select=*&user_id=eq.${user.id}&order=created_at.desc`
+        const response = await withTimeout(
+          fetch(url, {
+            method: 'GET',
+            headers: {
+              apikey: supabaseAnonKey,
+              Authorization: `Bearer ${accessToken}`,
+            },
+          }),
+          timeoutMs,
+          timeoutMessage
+        )
+        if (!response.ok) {
+          throw new Error(`${table}: ${response.status}`)
+        }
+        return (await response.json()) as T[]
+      }
+
+      const qData = await fetchList<QuoteRequest>('quote_requests', 7000, 'Tiempo de espera agotado al cargar cotizaciones')
+      const oData = await fetchList<Order>('orders', 7000, 'Tiempo de espera agotado al cargar órdenes')
+      const nData = await fetchList<Notification>('notifications', 7000, 'Tiempo de espera agotado al cargar notificaciones')
+      setQuotes(qData)
+      setOrders(oData)
+      setNotifications(nData)
+    } catch {
+      setLoadError('No se pudo cargar. Intentá con Actualizar.')
+    } finally {
       setLoading(false)
     }
-  }, [user.id])
+  }, [])
 
   useEffect(() => {
+    if (!initDone) return
     void load()
-  }, [load])
+  }, [initDone, load])
+
+  const unifiedRequests = useMemo(() => {
+    const list = quotes.map((q) => {
+      const order = orders.find((o) => o.quote_request_id === q.id)
+      return {
+        id: q.id,
+        created_at: q.created_at,
+        status: order ? order.status : q.status,
+        payment_status: q.payment_status,
+        customer_decision: q.customer_decision,
+        price: order?.total_amount ?? q.quoted_price,
+        hasOrder: !!order,
+        isStandalone: false,
+      }
+    })
+
+    const standaloneOrders = orders.filter(
+      (o) => !o.quote_request_id || !quotes.some((q) => q.id === o.quote_request_id)
+    )
+    for (const o of standaloneOrders) {
+      list.push({
+        id: o.id,
+        created_at: o.created_at,
+        status: o.status,
+        payment_status: null,
+        customer_decision: null,
+        price: o.total_amount,
+        hasOrder: true,
+        isStandalone: true,
+      })
+    }
+
+    return list.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+  }, [quotes, orders])
 
   const unread = notifications.filter((x) => !x.read_at).length
 
@@ -53,9 +129,14 @@ export default function MyOrders() {
           <div className="text-lg font-semibold text-text-primary">Mis pedidos y notificaciones</div>
           <div className="mt-1 text-sm text-text-secondary">Seguimiento de tus solicitudes y actualizaciones.</div>
         </div>
-        <Link to="/personalizar">
-          <Button size="sm">Nueva cotización</Button>
-        </Link>
+        <div className="flex items-center gap-2">
+          <Button size="sm" variant="secondary" onClick={() => void load()} disabled={loading}>
+            Actualizar
+          </Button>
+          <Link to="/personalizar">
+            <Button size="sm">Nueva cotización</Button>
+          </Link>
+        </div>
       </div>
 
       <div className="flex gap-2">
@@ -85,7 +166,16 @@ export default function MyOrders() {
         </button>
       </div>
 
-      {loading ? <div className="h-64 animate-pulse rounded-xl border border-white/10 bg-white/5" /> : null}
+      {loading && quotes.length === 0 && orders.length === 0 && notifications.length === 0 ? (
+        <div className="h-64 animate-pulse rounded-xl border border-white/10 bg-white/5" />
+      ) : null}
+      {loading && (quotes.length > 0 || orders.length > 0 || notifications.length > 0) ? (
+        <div className="text-xs text-text-secondary">Actualizando…</div>
+      ) : null}
+
+      {!loading && loadError ? (
+        <Card className="p-4 text-sm text-danger border border-danger/40 bg-danger/10">{loadError}</Card>
+      ) : null}
 
       {!loading && tab === 'pedidos' ? (
         <Card className="overflow-hidden">
@@ -96,50 +186,35 @@ export default function MyOrders() {
             <div className="col-span-3 text-right">Acción</div>
           </div>
           <div>
-            {quotes.length === 0 ? (
+            {unifiedRequests.length === 0 ? (
               <div className="p-4 text-sm text-text-secondary">Todavía no tenés solicitudes.</div>
             ) : (
-              quotes.map((q) => (
-                <div key={q.id} className="grid grid-cols-12 items-center gap-2 border-b border-white/5 px-4 py-3">
-                  <div className="col-span-3 text-sm text-text-primary">{q.id.slice(0, 8)}</div>
-                  <div className="col-span-3 text-sm text-text-secondary">{formatDateShort(q.created_at)}</div>
+              unifiedRequests.map((req) => (
+                <div key={req.id} className="grid grid-cols-12 items-center gap-2 border-b border-white/5 px-4 py-3">
+                  <div className="col-span-3 text-sm text-text-primary">{req.id.slice(0, 8)}</div>
+                  <div className="col-span-3 text-sm text-text-secondary">{formatDateShort(req.created_at)}</div>
                   <div className="col-span-3">
-                    <Badge tone={getStatusTone(q.status)}>{q.status}</Badge>
-                    {q.payment_status === 'paid' ? <div className="mt-1 text-xs text-text-secondary">Pagado</div> : null}
-                    {q.customer_decision === 'accepted' && q.payment_status !== 'paid' ? (
+                    <Badge tone={getStatusTone(req.status)}>{req.status}</Badge>
+                    {req.payment_status === 'paid' ? <div className="mt-1 text-xs text-text-secondary">Pagado</div> : null}
+                    {req.customer_decision === 'accepted' && req.payment_status !== 'paid' ? (
                       <div className="mt-1 text-xs text-text-secondary">Pago pendiente</div>
                     ) : null}
-                    {q.quoted_price != null ? (
-                      <div className="mt-1 text-xs text-text-secondary">{formatMoneyARS(q.quoted_price)}</div>
+                    {req.price != null ? (
+                      <div className="mt-1 text-xs text-text-secondary">{formatMoneyARS(req.price)}</div>
                     ) : null}
                   </div>
                   <div className="col-span-3 text-right">
-                    <Link to={`/mis-pedidos/${q.id}`} className="text-sm">
-                      Ver detalle
-                    </Link>
+                    {!req.isStandalone ? (
+                      <Link to={`/mis-pedidos/${req.id}`} className="text-sm">
+                        Ver detalle
+                      </Link>
+                    ) : (
+                      <div className="text-xs text-text-secondary">Pedido directo</div>
+                    )}
                   </div>
                 </div>
               ))
             )}
-
-            {orders.length ? (
-              <div className="border-t border-white/10 bg-white/5 px-4 py-3 text-xs text-text-secondary">Pedidos</div>
-            ) : null}
-            {orders.map((o) => (
-              <div key={o.id} className="grid grid-cols-12 items-center gap-2 border-b border-white/5 px-4 py-3">
-                <div className="col-span-3 text-sm text-text-primary">{o.id.slice(0, 8)}</div>
-                <div className="col-span-3 text-sm text-text-secondary">{formatDateShort(o.created_at)}</div>
-                <div className="col-span-3">
-                  <Badge tone={getStatusTone(o.status)}>{o.status}</Badge>
-                  {o.total_amount != null ? (
-                    <div className="mt-1 text-xs text-text-secondary">{formatMoneyARS(o.total_amount)}</div>
-                  ) : null}
-                </div>
-                <div className="col-span-3 text-right">
-                  <div className="text-xs text-text-secondary">Desde cotización</div>
-                </div>
-              </div>
-            ))}
           </div>
         </Card>
       ) : null}

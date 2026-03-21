@@ -11,6 +11,8 @@ import Register from '@/pages/Register'
 import MyOrders from '@/pages/MyOrders'
 import MyOrderDetail from '@/pages/MyOrderDetail'
 import PaymentResult from '@/pages/PaymentResult'
+import Terms from '@/pages/Terms'
+import Privacy from '@/pages/Privacy'
 import AdminShell from '@/pages/admin/AdminShell'
 import AdminHome from '@/pages/admin/AdminHome'
 import AdminQuotes from '@/pages/admin/AdminQuotes'
@@ -28,6 +30,8 @@ export default function App() {
           <Route path="/login" element={<Login />} />
           <Route path="/registro" element={<Register />} />
           <Route path="/pago/mercadopago" element={<PaymentResult />} />
+          <Route path="/terminos" element={<Terms />} />
+          <Route path="/privacidad" element={<Privacy />} />
 
           <Route element={<RequireAuth />}>
             <Route path="/mis-pedidos" element={<MyOrders />} />

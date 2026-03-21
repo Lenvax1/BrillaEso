@@ -8,6 +8,8 @@ import { ImageCarousel } from '@/components/gallery/ImageCarousel'
 import { supabase } from '@/lib/supabase'
 import type { GalleryWork, GalleryWorkImage } from '@/types'
 import { getPublicStorageUrl } from '@/lib/storage'
+import { withTimeout } from '@/lib/timeout'
+import { getErrorMessage } from '@/lib/error'
 
 export default function WorkDetail() {
   const { id } = useParams()
@@ -17,31 +19,50 @@ export default function WorkDetail() {
   const [imgs, setImgs] = useState<GalleryWorkImage[]>([])
 
   useEffect(() => {
-    if (!id) return
+    if (!id) {
+      setError('No encontrado')
+      setLoading(false)
+      return
+    }
     let alive = true
     ;(async () => {
       setLoading(true)
       setError(null)
-      const { data: w, error: wErr } = await supabase.from('gallery_works').select('*').eq('id', id).maybeSingle()
-      if (!alive) return
-      if (wErr || !w) {
-        setError(wErr?.message ?? 'No encontrado')
+      try {
+        const { data: w, error: wErr } = await withTimeout(
+          supabase.from('gallery_works').select('*').eq('id', id).maybeSingle(),
+          20_000,
+          'El trabajo está tardando demasiado en cargar. Reintentá.'
+        )
+        if (!alive) return
+        if (wErr || !w) {
+          setError(wErr?.message ?? 'No encontrado')
+          setWork(null)
+          setImgs([])
+          return
+        }
+        setWork(w as GalleryWork)
+
+        const { data: images, error: imgErr } = await withTimeout(
+          supabase
+            .from('gallery_work_images')
+            .select('*')
+            .eq('work_id', id)
+            .order('sort_order', { ascending: true }),
+          20_000,
+          'El contenido está tardando demasiado en cargar. Reintentá.'
+        )
+        if (!alive) return
+        if (imgErr) setError(imgErr.message)
+        setImgs((images as GalleryWorkImage[]) ?? [])
+      } catch (e) {
+        if (!alive) return
+        setError(getErrorMessage(e, 'No se pudo cargar el trabajo'))
         setWork(null)
         setImgs([])
-        setLoading(false)
-        return
+      } finally {
+        if (alive) setLoading(false)
       }
-      setWork(w as GalleryWork)
-
-      const { data: images, error: imgErr } = await supabase
-        .from('gallery_work_images')
-        .select('*')
-        .eq('work_id', id)
-        .order('sort_order', { ascending: true })
-      if (!alive) return
-      if (imgErr) setError(imgErr.message)
-      setImgs((images as GalleryWorkImage[]) ?? [])
-      setLoading(false)
     })()
     return () => {
       alive = false
@@ -77,7 +98,10 @@ export default function WorkDetail() {
 
   return (
     <div className="grid gap-8 lg:grid-cols-2 lg:items-start">
-      <ImageCarousel images={images} alt={work.title ?? 'Trabajo'} />
+      <div>
+        <ImageCarousel images={images} alt={work.title ?? 'Trabajo'} />
+        <div className="mt-2 text-xs text-text-secondary">Tocá la foto o video para verlo en grande.</div>
+      </div>
 
       <div>
         <div className="text-2xl font-semibold text-text-primary">{work.title ?? 'Trabajo'}</div>
@@ -119,4 +143,3 @@ function parseTags(tagsJson: string): string[] {
       .filter(Boolean)
   }
 }
-

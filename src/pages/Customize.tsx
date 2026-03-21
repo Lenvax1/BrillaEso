@@ -11,7 +11,7 @@ import { useAuthStore } from '@/stores/authStore'
 
 type Specs = {
   measures: { widthCm: number; heightCm: number }
-  style: { colors: string; background: 'transparent' | 'dark' | 'light' }
+  style: { colors: string; background: 'transparent' | 'dark' | 'light' | 'none' }
   text: string
   notes: string
 }
@@ -34,7 +34,7 @@ export default function Customize() {
   const [widthCm, setWidthCm] = useState(60)
   const [heightCm, setHeightCm] = useState(40)
   const [colors, setColors] = useState('verde, morado')
-  const [background, setBackground] = useState<'transparent' | 'dark' | 'light'>('dark')
+  const [background, setBackground] = useState<'transparent' | 'dark' | 'light' | 'none'>('dark')
   const [text, setText] = useState('')
   const [notes, setNotes] = useState('')
 
@@ -57,8 +57,9 @@ export default function Customize() {
   }, [file])
 
   const canSubmit = useMemo(() => {
-    return !!user && !!file && email.includes('@') && widthCm > 0 && heightCm > 0
-  }, [user, file, email, widthCm, heightCm])
+    const isPhoneValid = /^\+?\d{9,}$/.test(phone)
+    return !!user && !!file && email.includes('@') && widthCm > 0 && heightCm > 0 && isPhoneValid
+  }, [user, file, email, widthCm, heightCm, phone])
 
   const onSubmit = async () => {
     if (!user) {
@@ -71,24 +72,31 @@ export default function Customize() {
     setError(null)
     setOkId(null)
     try {
-      const uploadFile = await withTimeout(
-        compressImageIfNeeded(file),
-        8000,
-        'La imagen es muy pesada. Probá con una más liviana.'
-      )
+      const uploadFile = await withTimeout(compressImageIfNeeded(file), 15000, 'La imagen es muy pesada. Probá con una más liviana.')
       const ext = getExt(uploadFile.name)
       const path = `${user.id}/${crypto.randomUUID()}.${ext}`
 
       setStep('upload')
-      const uploadRes = await withTimeout(
-        supabase.storage.from('references').upload(path, uploadFile, {
-          upsert: false,
-          contentType: uploadFile.type,
-        }),
-        25000,
-        'La subida está tardando demasiado. Probá con otra imagen o revisá tu conexión.'
-      )
-      const upErr = uploadRes.error
+      let uploadError: unknown = null
+      for (let i = 0; i < 2; i++) {
+        const uploadRes = await withTimeout(
+          supabase.storage.from('references').upload(path, uploadFile, {
+            upsert: true,
+            contentType: uploadFile.type,
+          }),
+          60000,
+          'La subida está tardando demasiado. Probá con otra imagen o revisá tu conexión.'
+        ).catch((e) => {
+          uploadError = e
+          return null
+        })
+        if (uploadRes && !uploadRes.error) {
+          uploadError = null
+          break
+        }
+        uploadError = uploadRes?.error ?? uploadError
+      }
+      const upErr = uploadError
       if (upErr) throw upErr
 
       setStep('create')
@@ -100,22 +108,56 @@ export default function Customize() {
         notes,
       }
 
-      const { data, error: insErr } = await supabase
-        .from('quote_requests')
-        .insert({
-          user_id: user.id,
-          contact_email: email,
-          contact_phone: phone || null,
-          reference_image_url: path,
-          specs_json: JSON.stringify(specs),
+      let inserted: { id: string } | null = null
+      let createErr: unknown = null
+      for (let i = 0; i < 3; i++) {
+        const result = await withTimeout(
+          supabase
+            .from('quote_requests')
+            .insert({
+              user_id: user.id,
+              contact_email: email,
+              contact_phone: phone || null,
+              reference_image_url: path,
+              specs_json: JSON.stringify(specs),
+            })
+            .select('id')
+            .single(),
+          20_000,
+          'No se pudo crear la solicitud a tiempo. Reintentá.'
+        ).catch((e) => {
+          createErr = e
+          return null
         })
-        .select('id')
-        .single()
-      if (insErr) throw insErr
 
-      setOkId((data as { id: string }).id)
+        const insErr = result?.error ?? null
+        if (!insErr && result?.data) {
+          inserted = result.data as { id: string }
+          createErr = null
+          break
+        }
+
+        const msg = String((insErr as { message?: unknown } | null)?.message ?? '')
+        const looksAuth = msg.toLowerCase().includes('jwt') || msg.toLowerCase().includes('auth')
+        if (looksAuth) {
+          await supabase.auth.refreshSession().catch(() => null)
+        } else if (i < 2) {
+          await new Promise((resolve) => window.setTimeout(resolve, 700))
+        }
+        createErr = insErr ?? createErr
+      }
+
+      if (!inserted) throw createErr instanceof Error ? createErr : new Error('No se pudo crear la solicitud')
+
+      setOkId(inserted.id)
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Error al enviar solicitud')
+      const msg = e instanceof Error ? e.message : 'Error al enviar solicitud'
+      const lower = msg.toLowerCase()
+      if (lower.includes('jwt') || lower.includes('auth')) {
+        setError('Tu sesión venció. Iniciá sesión de nuevo e intentá otra vez.')
+      } else {
+        setError(msg)
+      }
     } finally {
       setLoading(false)
       setStep(null)
@@ -187,8 +229,8 @@ export default function Customize() {
 
           <div>
             <div className="mb-2 text-xs text-text-secondary">Fondo</div>
-            <div className="grid grid-cols-3 gap-2">
-              {(['transparent', 'dark', 'light'] as const).map((v) => (
+            <div className="grid grid-cols-2 gap-2">
+              {(['transparent', 'dark', 'light', 'none'] as const).map((v) => (
                 <button
                   key={v}
                   type="button"
@@ -200,7 +242,7 @@ export default function Customize() {
                   }
                   onClick={() => setBackground(v)}
                 >
-                  {v === 'transparent' ? 'Transparente' : v === 'dark' ? 'Oscuro' : 'Claro'}
+                  {v === 'transparent' ? 'Transparente' : v === 'dark' ? 'Oscuro' : v === 'light' ? 'Claro' : 'Sin fondo'}
                 </button>
               ))}
             </div>
@@ -222,7 +264,7 @@ export default function Customize() {
               <Input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="tu@email.com" />
             </div>
             <div>
-              <div className="mb-2 text-xs text-text-secondary">Teléfono (opcional)</div>
+              <div className="mb-2 text-xs text-text-secondary">Teléfono</div>
               <Input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+54…" />
             </div>
           </div>

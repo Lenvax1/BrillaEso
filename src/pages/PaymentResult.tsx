@@ -4,6 +4,7 @@ import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { supabase } from '@/lib/supabase'
 import type { QuoteRequest } from '@/types'
+import { withTimeout } from '@/lib/timeout'
 
 type ResultTone = 'success' | 'pending' | 'failure'
 
@@ -27,10 +28,20 @@ export default function PaymentResult() {
     let alive = true
     ;(async () => {
       setLoading(true)
-      const { data } = await supabase.from('quote_requests').select('*').eq('id', quoteId).maybeSingle()
-      if (!alive) return
-      setQ((data as QuoteRequest) ?? null)
-      setLoading(false)
+      try {
+        const { data } = await withTimeout(
+          supabase.from('quote_requests').select('*').eq('id', quoteId).maybeSingle(),
+          20_000,
+          'El resultado de pago está tardando demasiado en cargar. Reintentá.'
+        )
+        if (!alive) return
+        setQ((data as QuoteRequest) ?? null)
+      } catch {
+        if (!alive) return
+        setQ(null)
+      } finally {
+        if (alive) setLoading(false)
+      }
     })()
     return () => {
       alive = false
@@ -78,4 +89,3 @@ export default function PaymentResult() {
     </div>
   )
 }
-

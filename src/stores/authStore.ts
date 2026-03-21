@@ -11,6 +11,7 @@ type AuthState = {
   initDone: boolean
   init: () => Promise<void>
   signIn: (args: { email: string; password: string }) => Promise<void>
+  signInWithGoogle: (redirectPath?: string) => Promise<void>
   signUp: (args: { email: string; password: string }) => Promise<'signed_in' | 'needs_email_confirm'>
   signOut: () => Promise<void>
   refreshProfile: () => Promise<void>
@@ -69,6 +70,20 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const { error } = await supabase.auth.signInWithPassword({ email, password })
     set({ loading: false })
     if (error) throw error
+  },
+  signInWithGoogle: async (redirectPath) => {
+    set({ loading: true })
+    const normalizedPath = redirectPath?.startsWith('/') ? redirectPath : '/mis-pedidos'
+    const redirectTo = `${window.location.origin}${normalizedPath}`
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: { redirectTo },
+    })
+
+    if (error) {
+      set({ loading: false })
+      throw error
+    }
   },
   signUp: async ({ email, password }) => {
     set({ loading: true })

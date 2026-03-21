@@ -1,16 +1,10 @@
 import { Navigate, Outlet, useLocation } from 'react-router-dom'
-import { useEffect } from 'react'
 import { useAuthStore } from '@/stores/authStore'
 import { Spinner } from '@/components/ui/Spinner'
 
 export function RequireAuth() {
   const auth = useAuthStore()
-  const init = useAuthStore((s) => s.init)
   const loc = useLocation()
-
-  useEffect(() => {
-    void init()
-  }, [init])
 
   if (auth.loading && !auth.initDone) {
     return (

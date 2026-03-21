@@ -1,16 +1,21 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
 import { supabase } from '@/lib/supabase'
+import { withTimeout } from '@/lib/timeout'
+import { getEnv } from '@/lib/env'
 import type { Order } from '@/types'
 import { formatDateShort, formatMoneyARS } from '@/lib/format'
 import { getStatusTone } from '@/lib/status'
-import { withTimeout } from '@/lib/timeout'
+import { getSignedStorageUrl } from '@/lib/storage'
+import { useAuthStore } from '@/stores/authStore'
 
 const ORDER_STATUSES = ['Creado', 'En producción', 'Listo', 'Enviado', 'Finalizado', 'Cancelado']
+const supabaseUrl = getEnv('VITE_SUPABASE_URL')
+const supabaseAnonKey = getEnv('VITE_SUPABASE_ANON_KEY')
 
 export default function AdminOrders() {
   const [loading, setLoading] = useState(true)
@@ -23,39 +28,36 @@ export default function AdminOrders() {
   const [amount, setAmount] = useState<string>('')
   const [busy, setBusy] = useState(false)
   const [quoteAccepted, setQuoteAccepted] = useState<boolean>(false)
+  const [orderImg, setOrderImg] = useState<string>('')
 
-  const load = useMemo(() => {
-    return async () => {
-      setLoading(true)
-      setLoadError(null)
-      try {
-        let attempt = 0
-        while (attempt < 2) {
-          const { data, error } = await withTimeout(
-            supabase.from('orders').select('*').order('created_at', { ascending: false }).limit(200),
-            20_000,
-            'La carga tardó demasiado. Reintentá con Actualizar.'
-          )
-          if (!error) {
-            setItems((data as Order[]) ?? [])
-            return
-          }
-
-          const msg = String((error as { message?: unknown } | null)?.message ?? '')
-          const looksAuth = msg.toLowerCase().includes('jwt') || msg.toLowerCase().includes('auth')
-          if (looksAuth && attempt === 0) {
-            await supabase.auth.refreshSession().catch(() => null)
-            attempt++
-            continue
-          }
-          throw error
-        }
-      } catch (e) {
-        setItems([])
-        setLoadError(e instanceof Error ? e.message : 'No se pudo cargar')
-      } finally {
-        setLoading(false)
-      }
+  const load = useCallback(async () => {
+    setLoading(true)
+    setLoadError(null)
+    try {
+      const accessToken = useAuthStore.getState().session?.access_token
+      if (!accessToken) throw new Error('No access token')
+      const params = new URLSearchParams({
+        select: '*,quote_requests(contact_email,contact_phone)',
+        order: 'created_at.desc',
+        limit: '200',
+      })
+      const response = await withTimeout(
+        fetch(`${supabaseUrl}/rest/v1/orders?${params.toString()}`, {
+          headers: {
+            apikey: supabaseAnonKey,
+            Authorization: `Bearer ${accessToken}`,
+          },
+        }),
+        12000,
+        'Tiempo de espera agotado al cargar pedidos'
+      )
+      if (!response.ok) throw new Error(`orders: ${response.status}`)
+      const data = (await response.json()) as Order[]
+      setItems(data ?? [])
+    } catch {
+      setLoadError('No se pudo cargar. Intentá con Actualizar.')
+    } finally {
+      setLoading(false)
     }
   }, [])
 
@@ -64,56 +66,24 @@ export default function AdminOrders() {
   }, [load])
 
   useEffect(() => {
-    const onVisible = () => {
-      if (document.visibilityState === 'visible') void load()
-    }
-    const onOnline = () => void load()
-    document.addEventListener('visibilitychange', onVisible)
-    window.addEventListener('online', onOnline)
-    return () => {
-      document.removeEventListener('visibilitychange', onVisible)
-      window.removeEventListener('online', onOnline)
-    }
-  }, [load])
-
-  useEffect(() => {
-    let t: number | undefined
-    const channel = supabase
-      .channel('admin-orders')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => {
-        if (t) window.clearTimeout(t)
-        t = window.setTimeout(() => void load(), 300)
-      })
-      .subscribe()
-
-    return () => {
-      if (t) window.clearTimeout(t)
-      void supabase.removeChannel(channel)
-    }
-  }, [load])
-
-  useEffect(() => {
-    if (!openId) {
-      setDetail(null)
-      setQuoteAccepted(false)
-      return
-    }
+    if (!openId) { setDetail(null); setQuoteAccepted(false); return }
     const found = items.find((x) => x.id === openId) ?? null
     setDetail(found)
     setStatus(found?.status ?? 'Creado')
     setAmount(found?.total_amount != null ? String(found.total_amount) : '')
 
     if (found?.quote_request_id) {
-      void (async () => {
-        const { data } = await supabase
-          .from('quote_requests')
-          .select('customer_decision,payment_status')
-          .eq('id', found.quote_request_id)
-          .maybeSingle()
+      void supabase.from('quote_requests').select('customer_decision,payment_status').eq('id', found.quote_request_id).maybeSingle().then(({ data }) => {
         const decision = (data as { customer_decision?: string | null } | null)?.customer_decision
         const paid = (data as { payment_status?: string | null } | null)?.payment_status === 'paid'
         setQuoteAccepted(decision === 'accepted' || paid)
-      })()
+      })
+    }
+
+    if (found?.image_url) {
+      void getSignedStorageUrl('previews', found.image_url).then(setOrderImg).catch(() => setOrderImg(''))
+    } else {
+      setOrderImg('')
     }
   }, [openId, items])
 
@@ -128,6 +98,13 @@ export default function AdminOrders() {
     setBusy(true)
     const numeric = amount.trim() ? Number(amount) : null
     const nextStatus = quoteAccepted ? status : 'Creado'
+
+    if (nextStatus === 'Finalizado' && detail.quote_request_id) {
+      const { data: qr } = await supabase.from('quote_requests').select('reference_image_url, preview_image_url').eq('id', detail.quote_request_id).maybeSingle()
+      if (qr?.reference_image_url) await supabase.storage.from('references').remove([qr.reference_image_url]).catch(() => null)
+      if (qr?.preview_image_url) await supabase.storage.from('previews').remove([qr.preview_image_url]).catch(() => null)
+    }
+
     await supabase.from('orders').update({ status: nextStatus, total_amount: numeric }).eq('id', detail.id)
     if (detail.user_id) {
       await supabase.from('notifications').insert({
@@ -150,9 +127,7 @@ export default function AdminOrders() {
           <div className="mt-1 text-sm text-text-secondary">Estados operativos y notificaciones.</div>
         </div>
         <div className="flex items-end gap-3">
-          <Button size="sm" variant="secondary" onClick={() => void load()} disabled={loading}>
-            Actualizar
-          </Button>
+          <Button size="sm" variant="secondary" onClick={() => void load()} disabled={loading}>Actualizar</Button>
           <div className="w-full max-w-sm">
             <div className="mb-2 text-xs text-text-secondary">Buscar por ID / quote</div>
             <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="8f3a1c2b" />
@@ -160,13 +135,11 @@ export default function AdminOrders() {
         </div>
       </div>
 
-      {loading ? <div className="h-72 animate-pulse rounded-xl border border-white/10 bg-white/5" /> : null}
+      {loading && items.length === 0 ? <div className="h-72 animate-pulse rounded-xl border border-white/10 bg-white/5" /> : null}
+      {loading && items.length > 0 ? <div className="text-xs text-text-secondary">Actualizando pedidos…</div> : null}
+      {!loading && loadError ? <div className="rounded-xl border border-danger/40 bg-danger/10 p-3 text-sm text-danger">{loadError}</div> : null}
 
-      {!loading && loadError ? (
-        <div className="rounded-xl border border-danger/40 bg-danger/10 p-3 text-sm text-danger">{loadError}</div>
-      ) : null}
-
-      {!loading && !loadError ? (
+      {!loadError && (!loading || items.length > 0) ? (
         <Card className="overflow-hidden">
           <div className="grid grid-cols-12 gap-2 border-b border-white/10 bg-white/5 px-4 py-3 text-xs text-text-secondary">
             <div className="col-span-2">ID</div>
@@ -182,16 +155,18 @@ export default function AdminOrders() {
               filtered.map((o) => (
                 <div key={o.id} className="grid grid-cols-12 items-center gap-2 border-b border-white/5 px-4 py-3">
                   <div className="col-span-2 text-sm text-text-primary">{o.id.slice(0, 8)}</div>
-                  <div className="col-span-3 text-sm text-text-secondary">{o.quote_request_id?.slice(0, 8) ?? '-'}</div>
+                  <div className="col-span-3 text-sm text-text-secondary">
+                    <div>{o.quote_requests?.contact_email ?? '-'}</div>
+                    <div className="text-text-secondary/80">{o.quote_requests?.contact_phone}</div>
+                    <div className="text-xs text-text-secondary/70">Quote: {o.quote_request_id?.slice(0, 8) ?? '-'}</div>
+                  </div>
                   <div className="col-span-2 text-sm text-text-secondary">{formatDateShort(o.created_at)}</div>
                   <div className="col-span-3">
                     <Badge tone={getStatusTone(o.status)}>{o.status}</Badge>
                     {o.total_amount != null ? <div className="mt-1 text-xs text-text-secondary">{formatMoneyARS(o.total_amount)}</div> : null}
                   </div>
                   <div className="col-span-2 text-right">
-                    <Button size="sm" variant="secondary" onClick={() => setOpenId(o.id)}>
-                      Editar
-                    </Button>
+                    <Button size="sm" variant="secondary" onClick={() => setOpenId(o.id)}>Editar</Button>
                   </div>
                 </div>
               ))
@@ -204,9 +179,10 @@ export default function AdminOrders() {
         {detail ? (
           <div className="grid gap-4">
             <Card className="p-4">
-              <div className="text-sm font-semibold text-text-primary">Pedido {detail.id}</div>
-              <div className="mt-1 text-sm text-text-secondary">Quote: {detail.quote_request_id ?? '-'}</div>
+              <div className="text-sm font-semibold text-text-primary">Editar pedido</div>
+              <div className="mt-1 text-sm text-text-secondary/70">ID: {detail.id}</div>
             </Card>
+            {orderImg ? <Card className="overflow-hidden"><img src={orderImg} alt="Imagen del pedido" className="w-full object-cover" /></Card> : null}
             <Card className="p-4">
               <div className="mb-2 text-xs text-text-secondary">Total (ARS)</div>
               <Input value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="Ej: 65000" />
@@ -218,27 +194,16 @@ export default function AdminOrders() {
               ) : null}
               <div className="grid grid-cols-2 gap-2">
                 {ORDER_STATUSES.map((s) => (
-                  <button
-                    key={s}
-                    type="button"
-                    className={
-                      'h-10 rounded-lg border px-3 text-sm text-left ' +
-                      (status === s
-                        ? 'border-neon-green/50 bg-neon-green/10 text-neon-green'
-                        : 'border-white/10 bg-white/5 text-text-secondary hover:bg-white/10')
-                    }
-                    onClick={() => setStatus(s)}
-                    disabled={!quoteAccepted && s !== 'Creado'}
-                  >
+                  <button key={s} type="button"
+                    className={'h-10 rounded-lg border px-3 text-sm text-left ' + (status === s ? 'border-neon-green/50 bg-neon-green/10 text-neon-green' : 'border-white/10 bg-white/5 text-text-secondary hover:bg-white/10')}
+                    onClick={() => setStatus(s)} disabled={!quoteAccepted && s !== 'Creado'}>
                     {s}
                   </button>
                 ))}
               </div>
             </Card>
             <div className="flex justify-end">
-              <Button onClick={() => void save()} disabled={busy}>
-                Guardar y notificar
-              </Button>
+              <Button onClick={() => void save()} disabled={busy}>Guardar y notificar</Button>
             </div>
           </div>
         ) : null}

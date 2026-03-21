@@ -5,7 +5,8 @@ import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Spinner } from '@/components/ui/Spinner'
 import { supabase } from '@/lib/supabase'
-import { getPublicStorageUrl } from '@/lib/storage'
+import { getPublicStorageUrl, isVideoMediaPath } from '@/lib/storage'
+import { getErrorMessage } from '@/lib/error'
 
 export type GalleryImagesModel = {
   cover_image_url: string
@@ -43,7 +44,7 @@ export function GalleryImagesEditor({
       const cover_image_url = model.cover_image_url || path
       onChange({ cover_image_url, images })
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'No se pudo subir la imagen')
+      setError(getErrorMessage(e, 'No se pudo subir la imagen'))
     } finally {
       setBusy(false)
     }
@@ -75,7 +76,7 @@ export function GalleryImagesEditor({
     <Card className="p-4">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <div className="text-sm font-semibold text-text-primary">Imágenes</div>
+          <div className="text-sm font-semibold text-text-primary">Fotos y videos</div>
           <div className="mt-1 text-sm text-text-secondary">Subí múltiples, ordená y elegí portada.</div>
         </div>
         <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-text-primary hover:bg-white/10">
@@ -83,7 +84,7 @@ export function GalleryImagesEditor({
           {busy ? 'Subiendo…' : 'Subir'}
           <input
             type="file"
-            accept="image/png,image/jpeg"
+            accept="image/png,image/jpeg,video/mp4,video/webm,video/quicktime"
             className="hidden"
             disabled={busy}
             onChange={(e) => {
@@ -97,17 +98,28 @@ export function GalleryImagesEditor({
 
       {model.cover_image_url ? (
         <div className="mt-4 overflow-hidden rounded-xl border border-white/10 bg-black/30">
-          <img
-            src={getPublicStorageUrl('gallery', model.cover_image_url)}
-            alt="Portada"
-            className="w-full object-cover"
-            loading="lazy"
-            decoding="async"
-          />
+          {isVideoMediaPath(model.cover_image_url) ? (
+            <video
+              src={getPublicStorageUrl('gallery', model.cover_image_url)}
+              className="w-full object-cover"
+              controls
+              muted
+              playsInline
+              preload="metadata"
+            />
+          ) : (
+            <img
+              src={getPublicStorageUrl('gallery', model.cover_image_url)}
+              alt="Portada"
+              className="w-full object-cover"
+              loading="lazy"
+              decoding="async"
+            />
+          )}
         </div>
       ) : (
         <div className="mt-4 rounded-xl border border-white/10 bg-white/5 p-3 text-sm text-text-secondary">
-          Subí al menos una imagen para poder guardar.
+          Subí al menos una foto o video para poder guardar.
         </div>
       )}
 
@@ -118,13 +130,23 @@ export function GalleryImagesEditor({
       <div className="mt-4 grid gap-2">
         {model.images.map((i, idx) => (
           <div key={`${i.image_url}-${idx}`} className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 p-2">
-            <img
-              src={getPublicStorageUrl('gallery', i.image_url)}
-              alt=""
-              className="h-14 w-20 rounded-lg object-cover"
-              loading="lazy"
-              decoding="async"
-            />
+            {isVideoMediaPath(i.image_url) ? (
+              <video
+                src={getPublicStorageUrl('gallery', i.image_url)}
+                className="h-14 w-20 rounded-lg object-cover"
+                muted
+                playsInline
+                preload="metadata"
+              />
+            ) : (
+              <img
+                src={getPublicStorageUrl('gallery', i.image_url)}
+                alt=""
+                className="h-14 w-20 rounded-lg object-cover"
+                loading="lazy"
+                decoding="async"
+              />
+            )}
             <div className="min-w-0 flex-1">
               <div className="text-xs text-text-secondary truncate">{i.image_url}</div>
               {model.cover_image_url === i.image_url ? <Badge tone="green">Portada</Badge> : null}
@@ -154,5 +176,6 @@ function getExt(name: string) {
   const parts = name.split('.')
   const ext = parts.length > 1 ? parts[parts.length - 1].toLowerCase() : 'jpg'
   if (ext === 'png' || ext === 'jpg' || ext === 'jpeg') return ext === 'jpeg' ? 'jpg' : ext
+  if (ext === 'mp4' || ext === 'webm' || ext === 'mov') return ext
   return 'jpg'
 }
