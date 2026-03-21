@@ -46,6 +46,7 @@ export default function MyOrderDetail() {
       try {
         let qr: (QuoteRequest & { orders: Order[] }) | null = null
         for (let i = 0; i < 2; i++) {
+          let refreshAttempted = false
           try {
             const { data, error } = await withTimeout(
               supabase.from('quote_requests').select('*, orders(*)').eq('id', id).maybeSingle(),
@@ -59,12 +60,14 @@ export default function MyOrderDetail() {
             const msg = String(error?.message ?? '').toLowerCase()
             const looksAuth = msg.includes('jwt') || msg.includes('auth')
             if (looksAuth && i === 0) {
-              await withTimeout(supabase.auth.refreshSession(), 6_000, 'La sesión está tardando demasiado.').catch(() => null)
+              refreshAttempted = true
+              const refreshResult = await withTimeout(supabase.auth.refreshSession(), 6_000, 'La sesión está tardando demasiado.')
+              if (refreshResult.error) throw refreshResult.error
               continue
             }
             if (error && i === 1) throw error
           } catch (e) {
-            if (i === 0) continue
+            if (i === 0 && !refreshAttempted) continue
             throw e
           }
         }
@@ -101,14 +104,18 @@ export default function MyOrderDetail() {
         }
 
         try {
-          const { data: ps } = await withTimeout(
+          const { data: ps, error: paymentSettingsError } = await withTimeout(
             supabase.from('payment_settings').select('*').eq('id', 'default').maybeSingle(),
             20_000,
             'No se pudieron cargar los datos de pago a tiempo.'
           )
+          if (paymentSettingsError) throw paymentSettingsError
           setPay((ps as PaymentSettings) ?? null)
         } catch {
           setPay(null)
+          if (qr.customer_decision === 'accepted') {
+            setActionError('No se pudieron cargar los datos bancarios. Reintentá en unos minutos.')
+          }
         }
       } catch (e) {
         const msg = e instanceof Error ? e.message : 'No encontrado'

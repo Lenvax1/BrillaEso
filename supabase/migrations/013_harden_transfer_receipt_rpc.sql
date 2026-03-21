@@ -13,11 +13,14 @@ declare
   v_payload jsonb;
   v_holder text;
   v_last4 text;
+  v_receipt_url text;
 begin
   v_user := auth.uid();
   if v_user is null then
-    raise exception 'not_authenticated';
+    raise exception 'not authenticated';
   end if;
+
+  v_receipt_url := nullif(trim(p_receipt_url), '');
 
   begin
     v_payload := coalesce(nullif(trim(p_reference), '')::jsonb, '{}'::jsonb);
@@ -43,7 +46,7 @@ begin
       payment_id = null,
       payment_paid_at = null,
       payment_reference = jsonb_build_object('holder', v_holder, 'last4', v_last4)::text,
-      payment_receipt_url = null,
+      payment_receipt_url = v_receipt_url,
       payment_submitted_at = now(),
       payment_verified_at = null,
       payment_status = 'pending'

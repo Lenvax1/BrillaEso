@@ -30,6 +30,7 @@ function ModalContent({ detail, onUpdate }: { detail: QuoteRequest | null; onUpd
   const [price, setPrice] = useState<string>('')
   const [note, setNote] = useState<string>('')
   const [busy, setBusy] = useState(false)
+  const [opError, setOpError] = useState<string | null>(null)
   const [hasOrder, setHasOrder] = useState(false)
   const [detailImg, setDetailImg] = useState<string>('')
   const [previewImgFile, setPreviewImgFile] = useState<File | null>(null)
@@ -41,12 +42,12 @@ function ModalContent({ detail, onUpdate }: { detail: QuoteRequest | null; onUpd
   useEffect(() => {
     if (!detail) {
       setDetailImg(''); setHasOrder(false); setPrice(''); setStatus('En revisión')
-      setNote(''); setPreviewImgFile(null); setPreviewImgUrl('')
+      setNote(''); setPreviewImgFile(null); setPreviewImgUrl(''); setOpError(null)
       return
     }
     setPrice(detail.quoted_price != null ? String(detail.quoted_price) : '')
     setStatus(detail.status ?? 'En revisión')
-    setNote(''); setPreviewImgFile(null); setPreviewImgUrl('')
+    setNote(''); setPreviewImgFile(null); setPreviewImgUrl(''); setOpError(null)
 
     if (detail.reference_image_url) {
       void getSignedStorageUrl('references', detail.reference_image_url).then(setDetailImg).catch(() => setDetailImg(''))
@@ -64,30 +65,42 @@ function ModalContent({ detail, onUpdate }: { detail: QuoteRequest | null; onUpd
 
   const save = async () => {
     setBusy(true)
-    const numeric = price.trim() ? Number(price) : null
-    let previewUrl = detail.preview_image_url
+    setOpError(null)
+    try {
+      const numeric = price.trim() ? Number(price) : null
+      let previewUrl = detail.preview_image_url
 
-    if (previewImgFile) {
-      const fileExt = previewImgFile.name.split('.').pop()
-      const newPath = `${detail.user_id}/${detail.id}.${fileExt}`
-      const { error } = await supabase.storage.from('previews').upload(newPath, previewImgFile, { upsert: true })
-      if (!error) previewUrl = newPath
+      if (previewImgFile) {
+        const fileExt = previewImgFile.name.split('.').pop()
+        const newPath = `${detail.user_id}/${detail.id}.${fileExt}`
+        const { error } = await supabase.storage.from('previews').upload(newPath, previewImgFile, { upsert: true })
+        if (!error) previewUrl = newPath
+      }
+
+      const nextStatus = detail.status === QUOTE_STATUS_ALLOWED ? QUOTE_STATUS_ALLOWED
+        : status === QUOTE_STATUS_ALLOWED ? QUOTE_STATUS_ALLOWED : detail.status
+
+      const { error: updateError } = await supabase
+        .from('quote_requests')
+        .update({ quoted_price: numeric, status: nextStatus, preview_image_url: previewUrl })
+        .eq('id', detail.id)
+      if (updateError) throw updateError
+
+      const { error: notifyError } = await supabase.from('notifications').insert({
+        user_id: detail.user_id,
+        title: note.trim() ? `Actualización de solicitud ${detail.id.slice(0, 8)}` : `Solicitud ${detail.id.slice(0, 8)}: ${status}`,
+        body: note.trim() || (numeric != null ? `Presupuesto: ${formatMoneyARS(numeric)}` : `Estado actualizado: ${status}`),
+        link_url: `/mis-pedidos/${detail.id}`,
+      })
+      if (notifyError) setOpError('Se guardó la cotización, pero no se pudo enviar la notificación.')
+
+      onUpdate({ ...detail, status: nextStatus, quoted_price: numeric, preview_image_url: previewUrl })
+      setStatus(nextStatus)
+    } catch (e) {
+      setOpError(e instanceof Error ? e.message : 'No se pudo guardar la cotización.')
+    } finally {
+      setBusy(false)
     }
-
-    const nextStatus = detail.status === QUOTE_STATUS_ALLOWED ? QUOTE_STATUS_ALLOWED
-      : status === QUOTE_STATUS_ALLOWED ? QUOTE_STATUS_ALLOWED : detail.status
-
-    await supabase.from('quote_requests').update({ quoted_price: numeric, status: nextStatus, preview_image_url: previewUrl }).eq('id', detail.id)
-    await supabase.from('notifications').insert({
-      user_id: detail.user_id,
-      title: note.trim() ? `Actualización de solicitud ${detail.id.slice(0, 8)}` : `Solicitud ${detail.id.slice(0, 8)}: ${status}`,
-      body: note.trim() || (numeric != null ? `Presupuesto: ${formatMoneyARS(numeric)}` : `Estado actualizado: ${status}`),
-      link_url: `/mis-pedidos/${detail.id}`,
-    })
-
-    onUpdate({ ...detail, status: nextStatus, quoted_price: numeric, preview_image_url: previewUrl })
-    setStatus(nextStatus)
-    setBusy(false)
   }
 
   const createOrder = async () => {
@@ -113,15 +126,24 @@ function ModalContent({ detail, onUpdate }: { detail: QuoteRequest | null; onUpd
 
   const markPaid = async () => {
     setBusy(true)
-    await supabase.rpc('admin_mark_transfer_paid', { p_quote_request_id: detail.id })
-    await supabase.from('notifications').insert({
-      user_id: detail.user_id,
-      title: `Pago verificado ${detail.id.slice(0, 8)}`,
-      body: 'Verificamos tu transferencia. Continuamos con la producción.',
-      link_url: `/mis-pedidos/${detail.id}`,
-    })
-    onUpdate({ ...detail, payment_status: 'paid' })
-    setBusy(false)
+    setOpError(null)
+    try {
+      const { error: rpcError } = await supabase.rpc('admin_mark_transfer_paid', { p_quote_request_id: detail.id })
+      if (rpcError) throw rpcError
+
+      const { error: notifyError } = await supabase.from('notifications').insert({
+        user_id: detail.user_id,
+        title: `Pago verificado ${detail.id.slice(0, 8)}`,
+        body: 'Verificamos tu transferencia. Continuamos con la producción.',
+        link_url: `/mis-pedidos/${detail.id}`,
+      })
+      if (notifyError) setOpError('Pago actualizado, pero no se pudo enviar la notificación.')
+      onUpdate({ ...detail, payment_status: 'paid' })
+    } catch (e) {
+      setOpError(e instanceof Error ? e.message : 'No se pudo marcar el pago como verificado.')
+    } finally {
+      setBusy(false)
+    }
   }
 
   return (
@@ -182,6 +204,9 @@ function ModalContent({ detail, onUpdate }: { detail: QuoteRequest | null; onUpd
                 </Button>
               </div>
             </div>
+          ) : null}
+          {opError ? (
+            <div className="mt-3 rounded-xl border border-danger/40 bg-danger/10 p-3 text-sm text-danger">{opError}</div>
           ) : null}
         </Card>
       </div>
