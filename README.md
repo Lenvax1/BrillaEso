@@ -66,6 +66,12 @@ export default tseslint.config({
   - `VITE_SUPABASE_URL`
   - `VITE_SUPABASE_ANON_KEY`
 
+### Deploy en Cloudflare
+- En Cloudflare Pages, configurar `VITE_SUPABASE_URL` y `VITE_SUPABASE_ANON_KEY` en **Settings → Environment variables**.
+- Estas variables deben existir en el entorno donde corre el build.
+- `VITE_SUPABASE_URL` debe incluir protocolo (`https://`) y dominio completo del proyecto de Supabase.
+- Luego de cambiar variables, disparar un nuevo deploy para que Vite las inyecte en el bundle final.
+
 ### Mercado Pago (Edge Functions)
 Para que funcione el botón **Aceptar y pagar**, se usan Edge Functions.
 
