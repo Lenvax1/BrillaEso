@@ -76,8 +76,8 @@ export default function Home() {
         </div>
         <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
           <img
-            src="https://coreva-normal.trae.ai/api/ide/v1/text_to_image?prompt=neon%20sign%20wall%20art%2C%20dark%20studio%20background%2C%20glowing%20green%20and%20purple%20neon%2C%20minimal%20premium%20product%20photography%2C%20soft%20fog%2C%20high%20contrast%2C%20sharp%20details%2C%20center%20composition&image_size=landscape_16_9"
-            alt="Mockup"
+            src="/images/Logotipo16-9.jpeg"
+            alt="Brilla Eso"
             className="aspect-video w-full rounded-xl object-cover"
             loading="lazy"
           />
