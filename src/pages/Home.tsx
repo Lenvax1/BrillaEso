@@ -76,8 +76,8 @@ export default function Home() {
         </div>
         <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
           <img
-            src="/images/Logotipo16-9.jpeg"
-            alt="Brilla Eso"
+            src="public/Logotipo16-9.jpeg"
+            alt="Mockup"
             className="aspect-video w-full rounded-xl object-cover"
             loading="lazy"
           />
