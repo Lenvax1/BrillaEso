@@ -121,6 +121,7 @@ export default function AdminOrders() {
         'Tiempo de espera agotado al actualizar el pedido'
       )
       if (updateError) throw updateError
+      let hasPartialError = false
       if (detail.user_id) {
         const title = `Pedido ${detail.id.slice(0, 8)}: ${nextStatus}`
         const body = numeric != null ? `Total: ${formatMoneyARS(numeric)}` : `Estado actualizado: ${nextStatus}`
@@ -135,8 +136,11 @@ export default function AdminOrders() {
           10000,
           'Tiempo de espera agotado al notificar al cliente'
         )
-        if (notifyError) setOpError('Pedido guardado, pero no se pudo crear la notificación.')
-        await withTimeout(
+        if (notifyError) {
+          hasPartialError = true
+          setOpError('Pedido guardado, pero no se pudo crear la notificación.')
+        }
+        const emailResult = await withTimeout(
           sendEmailNotification({
             userId: detail.user_id ?? undefined,
             recipientEmail: detail.quote_requests?.contact_email ?? undefined,
@@ -146,10 +150,20 @@ export default function AdminOrders() {
           }),
           10000,
           'Tiempo de espera agotado al enviar el email'
-        ).catch(() => setOpError('Pedido guardado, pero no se pudo enviar el email.'))
+        ).catch(() => {
+          hasPartialError = true
+          setOpError('Pedido guardado, pero no se pudo enviar el email.')
+          return { ok: false, detail: 'timeout' }
+        })
+        if (!emailResult.ok) {
+          hasPartialError = true
+          setOpError('Pedido guardado, pero no se pudo enviar el email.')
+        }
+      }
+      if (!hasPartialError) {
+        setOpenId(null)
       }
       await load()
-      setOpenId(null)
     } catch (e) {
       setOpError(e instanceof Error ? e.message : 'No se pudo guardar el pedido.')
     } finally {

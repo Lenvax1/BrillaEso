@@ -159,14 +159,20 @@ serve(async (req) => {
     body: 'Aceptaste el presupuesto. Completá el pago para continuar.',
     link_url: `/mis-pedidos/${body.quoteRequestId}`,
   })
-  await sendNotificationEmail({
+  const emailResult = await sendNotificationEmail({
     supabaseUrl,
     serviceRoleKey: serviceKey,
     userId: userData.user.id,
     title: 'Presupuesto aceptado',
     body: 'Aceptaste el presupuesto. Completá el pago para continuar.',
     linkUrl: `/mis-pedidos/${body.quoteRequestId}`,
-  }).catch(() => null)
+  }).catch((error) => {
+    console.error('sendNotificationEmail unexpected error', error)
+    return { ok: false, detail: 'unexpected_error' }
+  })
+  if (!emailResult.ok) {
+    console.error('sendNotificationEmail failed', emailResult)
+  }
 
   return new Response(JSON.stringify({ init_point: initPoint }), {
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },

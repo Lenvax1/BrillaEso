@@ -96,13 +96,14 @@ function ModalContent({ detail, onUpdate }: { detail: QuoteRequest | null; onUpd
         link_url: `/mis-pedidos/${detail.id}`,
       })
       if (notifyError) setOpError('Se guardó la cotización, pero no se pudo enviar la notificación.')
-      await sendEmailNotification({
+      const emailResult = await sendEmailNotification({
         userId: detail.user_id ?? undefined,
         recipientEmail: detail.contact_email ?? undefined,
         title: note.trim() ? `Actualización de solicitud ${detail.id.slice(0, 8)}` : `Solicitud ${detail.id.slice(0, 8)}: ${status}`,
         body: note.trim() || (numeric != null ? `Presupuesto: ${formatMoneyARS(numeric)}` : `Estado actualizado: ${status}`),
         linkUrl: `/mis-pedidos/${detail.id}`,
       })
+      if (!emailResult.ok) setOpError('Se guardó la cotización, pero no se pudo enviar el email.')
 
       onUpdate({ ...detail, status: nextStatus, quoted_price: numeric, preview_image_url: previewUrl })
       setStatus(nextStatus)
@@ -117,28 +118,40 @@ function ModalContent({ detail, onUpdate }: { detail: QuoteRequest | null; onUpd
     if (!detail.user_id) return
     const numeric = price.trim() ? Number(price) : null
     setBusy(true)
-    await supabase.from('orders').insert({
-      user_id: detail.user_id,
-      quote_request_id: detail.id,
-      status: 'Creado',
-      total_amount: numeric,
-      image_url: detail.preview_image_url || detail.reference_image_url,
-    })
-    await supabase.from('notifications').insert({
-      user_id: detail.user_id,
-      title: `Pedido creado desde ${detail.id.slice(0, 8)}`,
-      body: numeric != null ? `Total: ${formatMoneyARS(numeric)}` : 'Tu pedido ya está en proceso.',
-      link_url: `/mis-pedidos/${detail.id}`,
-    })
-    await sendEmailNotification({
-      userId: detail.user_id,
-      recipientEmail: detail.contact_email ?? undefined,
-      title: `Pedido creado desde ${detail.id.slice(0, 8)}`,
-      body: numeric != null ? `Total: ${formatMoneyARS(numeric)}` : 'Tu pedido ya está en proceso.',
-      linkUrl: `/mis-pedidos/${detail.id}`,
-    })
-    setBusy(false)
-    setHasOrder(true)
+    setOpError(null)
+    try {
+      const { error: orderError } = await supabase.from('orders').insert({
+        user_id: detail.user_id,
+        quote_request_id: detail.id,
+        status: 'Creado',
+        total_amount: numeric,
+        image_url: detail.preview_image_url || detail.reference_image_url,
+      })
+      if (orderError) throw orderError
+
+      const { error: notifyError } = await supabase.from('notifications').insert({
+        user_id: detail.user_id,
+        title: `Pedido creado desde ${detail.id.slice(0, 8)}`,
+        body: numeric != null ? `Total: ${formatMoneyARS(numeric)}` : 'Tu pedido ya está en proceso.',
+        link_url: `/mis-pedidos/${detail.id}`,
+      })
+      if (notifyError) setOpError('Pedido creado, pero no se pudo enviar la notificación.')
+
+      const emailResult = await sendEmailNotification({
+        userId: detail.user_id,
+        recipientEmail: detail.contact_email ?? undefined,
+        title: `Pedido creado desde ${detail.id.slice(0, 8)}`,
+        body: numeric != null ? `Total: ${formatMoneyARS(numeric)}` : 'Tu pedido ya está en proceso.',
+        linkUrl: `/mis-pedidos/${detail.id}`,
+      })
+      if (!emailResult.ok) setOpError('Pedido creado, pero no se pudo enviar el email.')
+
+      setHasOrder(true)
+    } catch (e) {
+      setOpError(e instanceof Error ? e.message : 'No se pudo crear el pedido.')
+    } finally {
+      setBusy(false)
+    }
   }
 
   const markPaid = async () => {
@@ -159,13 +172,15 @@ function ModalContent({ detail, onUpdate }: { detail: QuoteRequest | null; onUpd
         link_url: `/mis-pedidos/${detail.id}`,
       })
       if (notifyError) setOpError('Pago actualizado, pero no se pudo enviar la notificación.')
-      await sendEmailNotification({
+      const emailResult = await sendEmailNotification({
         userId: detail.user_id,
         recipientEmail: detail.contact_email ?? undefined,
         title: `Pago verificado ${detail.id.slice(0, 8)}`,
         body: 'Verificamos tu transferencia. Continuamos con la producción.',
         linkUrl: `/mis-pedidos/${detail.id}`,
       })
+      if (!emailResult.ok) setOpError('Pago actualizado, pero no se pudo enviar el email.')
+      setHasOrder(true)
       onUpdate({ ...detail, payment_status: 'paid' })
     } catch (e) {
       setOpError(e instanceof Error ? e.message : 'No se pudo marcar el pago como verificado.')
@@ -205,13 +220,14 @@ function ModalContent({ detail, onUpdate }: { detail: QuoteRequest | null; onUpd
         link_url: `/mis-pedidos/${detail.id}`,
       })
       if (notifyError) setOpError('Se solicitó el reenvío, pero no se pudo enviar la notificación.')
-      await sendEmailNotification({
+      const emailResult = await sendEmailNotification({
         userId: detail.user_id,
         recipientEmail: detail.contact_email ?? undefined,
         title: `Necesitamos verificar tu transferencia ${detail.id.slice(0, 8)}`,
         body: 'Revisamos tu pago y necesitamos que vuelvas a cargar los datos de la transferencia.',
         linkUrl: `/mis-pedidos/${detail.id}`,
       })
+      if (!emailResult.ok) setOpError('Se solicitó el reenvío, pero no se pudo enviar el email.')
       onUpdate({ ...detail, payment_status: 'failed', payment_submitted_at: null, payment_verified_at: null, payment_reference: null })
     } catch (e) {
       setOpError(e instanceof Error ? e.message : 'No se pudo solicitar el reenvío de datos.')

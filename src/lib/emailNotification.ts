@@ -9,10 +9,21 @@ type EmailNotificationPayload = {
   linkUrl?: string | null
 }
 
+type EmailNotificationResult = {
+  ok: boolean
+  status?: number
+  detail?: string
+}
+
 export async function sendEmailNotification(payload: EmailNotificationPayload) {
   if ((!payload.userId && !payload.recipientEmail) || !payload.title?.trim() || !payload.body?.trim()) {
-    console.warn('send-notification-email skipped invalid payload', payload)
-    return
+    console.warn('send-notification-email skipped invalid payload', {
+      hasUserId: Boolean(payload.userId),
+      hasRecipientEmail: Boolean(payload.recipientEmail),
+      hasTitle: Boolean(payload.title?.trim()),
+      hasBody: Boolean(payload.body?.trim()),
+    })
+    return { ok: false, detail: 'invalid_payload' } satisfies EmailNotificationResult
   }
 
   const invokeWithToken = async (accessToken: string) => {
@@ -43,7 +54,7 @@ export async function sendEmailNotification(payload: EmailNotificationPayload) {
     const token = refreshed?.data.session?.access_token ?? initialToken
     if (!token) {
       console.warn('send-notification-email skipped missing auth session')
-      return
+      return { ok: false, detail: 'missing_auth_session' } satisfies EmailNotificationResult
     }
 
     let result = await invokeWithToken(token)
@@ -56,18 +67,29 @@ export async function sendEmailNotification(payload: EmailNotificationPayload) {
     }
     if (!result.ok) {
       console.error('send-notification-email invoke failed', result)
-      return
+      return {
+        ok: false,
+        status: result.status,
+        detail: typeof result.data === 'object' && result.data && 'detail' in result.data
+          ? String((result.data as { detail?: unknown }).detail ?? '')
+          : 'invoke_failed',
+      } satisfies EmailNotificationResult
     }
     const data = result.data
     if (data && typeof data === 'object' && 'ok' in data && (data as { ok?: boolean }).ok === false) {
       console.error('send-notification-email provider error', data)
-      return
+      return {
+        ok: false,
+        detail: 'provider_error',
+      } satisfies EmailNotificationResult
     }
     if (data && typeof data === 'object' && 'skipped' in data && (data as { skipped?: boolean }).skipped) {
       console.warn('send-notification-email skipped', data)
+      return { ok: false, detail: 'skipped' } satisfies EmailNotificationResult
     }
+    return { ok: true } satisfies EmailNotificationResult
   } catch (e) {
     console.error('send-notification-email unexpected error', e)
-    return
+    return { ok: false, detail: e instanceof Error ? e.message : 'unexpected_error' } satisfies EmailNotificationResult
   }
 }

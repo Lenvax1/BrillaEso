@@ -46,11 +46,17 @@ serve(async (req) => {
   }
 
   const adminClient = createClient(supabaseUrl, serviceRoleKey)
-  const { data: profile } = await adminClient
+  const { data: profile, error: profileError } = await adminClient
     .from('profiles')
     .select('is_admin')
     .eq('id', authData.user.id)
     .maybeSingle()
+  if (profileError) {
+    return new Response(JSON.stringify({ error: 'Failed to verify permissions' }), {
+      status: 500,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    })
+  }
   const isAdmin = !!profile?.is_admin
 
   let payload: ReqBody

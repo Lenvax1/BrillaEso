@@ -32,10 +32,13 @@ export async function sendNotificationEmail(args: SendEmailArgs) {
   }
   if (!recipient) return { ok: true, skipped: true }
 
-  const appBaseUrl = Deno.env.get('APP_BASE_URL') ?? ''
-  const fullLink = args.linkUrl?.startsWith('http')
-    ? args.linkUrl
-    : (args.linkUrl ? `${appBaseUrl}${args.linkUrl}` : '')
+  const appBaseUrl = Deno.env.get('APP_BASE_URL')?.trim() ?? ''
+  let fullLink = ''
+  if (args.linkUrl) {
+    if (!args.linkUrl.startsWith('/')) return { ok: false, detail: 'invalid_link_url' }
+    if (!appBaseUrl) return { ok: false, detail: 'missing_app_base_url' }
+    fullLink = `${appBaseUrl}${args.linkUrl}`
+  }
 
   const safeTitle = escapeHtml(args.title)
   const safeBody = escapeHtml(args.body)
@@ -44,20 +47,28 @@ export async function sendNotificationEmail(args: SendEmailArgs) {
     ? `<div><h2>${safeTitle}</h2><p>${safeBody}</p><p><a href="${safeLink}">Ver detalle</a></p></div>`
     : `<div><h2>${safeTitle}</h2><p>${safeBody}</p></div>`
 
-  const response = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${resendApiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      from: senderEmail,
-      to: [recipient],
-      subject: args.title,
-      html,
-      text: fullLink ? `${args.title}\n\n${args.body}\n\n${fullLink}` : `${args.title}\n\n${args.body}`,
-    }),
-  })
+  let response: Response
+  try {
+    response = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${resendApiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        from: senderEmail,
+        to: [recipient],
+        subject: args.title,
+        html,
+        text: fullLink ? `${args.title}\n\n${args.body}\n\n${fullLink}` : `${args.title}\n\n${args.body}`,
+      }),
+    })
+  } catch (error) {
+    return {
+      ok: false,
+      detail: error instanceof Error ? error.message.slice(0, 600) : 'provider_request_failed',
+    }
+  }
 
   if (!response.ok) {
     const detail = await response.text().catch(() => '')

@@ -87,7 +87,7 @@ serve(async (req) => {
   }
 
   if (payment.status === 'approved') {
-    await admin
+    const { data: updatedQr, error: paidError } = await admin
       .from('quote_requests')
       .update({
         payment_provider: 'mercadopago',
@@ -96,33 +96,47 @@ serve(async (req) => {
         payment_paid_at: new Date().toISOString(),
       })
       .eq('id', quoteRequestId)
+      .not('payment_status', 'eq', 'paid')
+      .select('id,user_id,quoted_price')
+      .maybeSingle()
+    if (paidError) {
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
 
-    if (qr.user_id) {
+    if (updatedQr?.user_id) {
       await admin.from('orders').upsert(
         {
-          user_id: qr.user_id,
+          user_id: updatedQr.user_id,
           quote_request_id: quoteRequestId,
           status: 'Creado',
-          total_amount: qr.quoted_price,
+          total_amount: updatedQr.quoted_price,
           shipping_json: null,
         },
         { onConflict: 'quote_request_id' }
       )
 
       await admin.from('notifications').insert({
-        user_id: qr.user_id,
+        user_id: updatedQr.user_id,
         title: 'Pago recibido',
         body: 'Recibimos tu pago. Te vamos avisando los próximos estados.',
         link_url: `/mis-pedidos/${quoteRequestId}`,
       })
-      await sendNotificationEmail({
+      const emailResult = await sendNotificationEmail({
         supabaseUrl,
         serviceRoleKey: serviceKey,
-        userId: qr.user_id,
+        userId: updatedQr.user_id,
         title: 'Pago recibido',
         body: 'Recibimos tu pago. Te vamos avisando los próximos estados.',
         linkUrl: `/mis-pedidos/${quoteRequestId}`,
-      }).catch(() => null)
+      }).catch((error) => {
+        console.error('sendNotificationEmail unexpected error', error)
+        return { ok: false, detail: 'unexpected_error' }
+      })
+      if (!emailResult.ok) {
+        console.error('sendNotificationEmail failed', emailResult)
+      }
     }
   } else if (payment.status === 'rejected' || payment.status === 'cancelled') {
     await admin
