@@ -1,5 +1,6 @@
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.50.0'
+import { sendNotificationEmail } from '../_shared/sendNotificationEmail.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -87,6 +88,14 @@ serve(async (req) => {
     body: 'Marcaste el presupuesto como rechazado. Si querés, podés crear otra cotización con cambios.',
     link_url: `/mis-pedidos/${body.quoteRequestId}`,
   })
+  await sendNotificationEmail({
+    supabaseUrl,
+    serviceRoleKey: serviceKey,
+    userId: userData.user.id,
+    title: 'Presupuesto rechazado',
+    body: 'Marcaste el presupuesto como rechazado. Si querés, podés crear otra cotización con cambios.',
+    linkUrl: `/mis-pedidos/${body.quoteRequestId}`,
+  }).catch(() => null)
 
   return new Response(JSON.stringify({ ok: true }), {
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },

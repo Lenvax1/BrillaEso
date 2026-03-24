@@ -1,5 +1,6 @@
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.50.0'
+import { sendNotificationEmail } from '../_shared/sendNotificationEmail.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -114,6 +115,14 @@ serve(async (req) => {
         body: 'Recibimos tu pago. Te vamos avisando los próximos estados.',
         link_url: `/mis-pedidos/${quoteRequestId}`,
       })
+      await sendNotificationEmail({
+        supabaseUrl,
+        serviceRoleKey: serviceKey,
+        userId: qr.user_id,
+        title: 'Pago recibido',
+        body: 'Recibimos tu pago. Te vamos avisando los próximos estados.',
+        linkUrl: `/mis-pedidos/${quoteRequestId}`,
+      }).catch(() => null)
     }
   } else if (payment.status === 'rejected' || payment.status === 'cancelled') {
     await admin

@@ -77,6 +77,9 @@ Para que funcione el botón **Aceptar y pagar**, se usan Edge Functions.
 
 1) En Supabase Dashboard → **Project Settings** → **Edge Functions** → **Secrets**
 - `MP_ACCESS_TOKEN`: access token de Mercado Pago
+- `RESEND_API_KEY`: API key de Resend para envío de emails
+- `MAIL_SENDER`: remitente validado en Resend (ej: `Brilla Eso <notificaciones@tu-dominio.com>`)
+- `APP_BASE_URL`: URL pública de la app (ej: `https://brillaeso.com.ar`)
 
 2) Deploy de funciones
 Necesitás Supabase CLI autenticado (o `SUPABASE_ACCESS_TOKEN` configurado) y ejecutar:
@@ -86,6 +89,7 @@ npx -y supabase link --project-ref ypdyadhdyftmudtguhuj
 npx -y supabase functions deploy mp-create-preference
 npx -y supabase functions deploy quote-reject
 npx -y supabase functions deploy mp-webhook
+npx -y supabase functions deploy send-notification-email
 ```
 
 Notas:

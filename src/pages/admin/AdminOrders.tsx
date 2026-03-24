@@ -11,22 +11,30 @@ import type { Order } from '@/types'
 import { formatDateShort, formatMoneyARS } from '@/lib/format'
 import { getStatusTone } from '@/lib/status'
 import { getSignedStorageUrl } from '@/lib/storage'
+import { sendEmailNotification } from '@/lib/emailNotification'
 import { useAuthStore } from '@/stores/authStore'
 
 const ORDER_STATUSES = ['Creado', 'En producción', 'Listo', 'Enviado', 'Finalizado', 'Cancelado']
 const supabaseUrl = getEnv('VITE_SUPABASE_URL')
 const supabaseAnonKey = getEnv('VITE_SUPABASE_ANON_KEY')
+type AdminOrder = Order & {
+  quote_requests: (Order['quote_requests'] & {
+    customer_decision?: string | null
+    payment_status?: string | null
+  }) | null
+}
 
 export default function AdminOrders() {
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
-  const [items, setItems] = useState<Order[]>([])
+  const [items, setItems] = useState<AdminOrder[]>([])
   const [query, setQuery] = useState('')
   const [openId, setOpenId] = useState<string | null>(null)
   const [detail, setDetail] = useState<Order | null>(null)
   const [status, setStatus] = useState('Creado')
   const [amount, setAmount] = useState<string>('')
   const [busy, setBusy] = useState(false)
+  const [opError, setOpError] = useState<string | null>(null)
   const [quoteAccepted, setQuoteAccepted] = useState<boolean>(false)
   const [orderImg, setOrderImg] = useState<string>('')
 
@@ -37,7 +45,7 @@ export default function AdminOrders() {
       const accessToken = useAuthStore.getState().session?.access_token
       if (!accessToken) throw new Error('No access token')
       const params = new URLSearchParams({
-        select: '*,quote_requests(contact_email,contact_phone)',
+        select: '*,quote_requests(contact_email,contact_phone,customer_decision,payment_status)',
         order: 'created_at.desc',
         limit: '200',
       })
@@ -52,7 +60,7 @@ export default function AdminOrders() {
         'Tiempo de espera agotado al cargar pedidos'
       )
       if (!response.ok) throw new Error(`orders: ${response.status}`)
-      const data = (await response.json()) as Order[]
+      const data = (await response.json()) as AdminOrder[]
       setItems(data ?? [])
     } catch {
       setLoadError('No se pudo cargar. Intentá con Actualizar.')
@@ -66,19 +74,15 @@ export default function AdminOrders() {
   }, [load])
 
   useEffect(() => {
-    if (!openId) { setDetail(null); setQuoteAccepted(false); return }
+    if (!openId) { setDetail(null); setQuoteAccepted(false); setBusy(false); setOpError(null); return }
     const found = items.find((x) => x.id === openId) ?? null
     setDetail(found)
     setStatus(found?.status ?? 'Creado')
     setAmount(found?.total_amount != null ? String(found.total_amount) : '')
-
-    if (found?.quote_request_id) {
-      void supabase.from('quote_requests').select('customer_decision,payment_status').eq('id', found.quote_request_id).maybeSingle().then(({ data }) => {
-        const decision = (data as { customer_decision?: string | null } | null)?.customer_decision
-        const paid = (data as { payment_status?: string | null } | null)?.payment_status === 'paid'
-        setQuoteAccepted(decision === 'accepted' || paid)
-      })
-    }
+    const decision = found?.quote_requests?.customer_decision
+    const paid = found?.quote_requests?.payment_status === 'paid'
+    setQuoteAccepted(decision === 'accepted' || paid)
+    setOpError(null)
 
     if (found?.image_url) {
       void getSignedStorageUrl('previews', found.image_url).then(setOrderImg).catch(() => setOrderImg(''))
@@ -96,27 +100,61 @@ export default function AdminOrders() {
   const save = async () => {
     if (!detail) return
     setBusy(true)
-    const numeric = amount.trim() ? Number(amount) : null
-    const nextStatus = quoteAccepted ? status : 'Creado'
+    setOpError(null)
+    try {
+      const numeric = amount.trim() ? Number(amount) : null
+      const nextStatus = quoteAccepted ? status : 'Creado'
 
-    if (nextStatus === 'Finalizado' && detail.quote_request_id) {
-      const { data: qr } = await supabase.from('quote_requests').select('reference_image_url, preview_image_url').eq('id', detail.quote_request_id).maybeSingle()
-      if (qr?.reference_image_url) await supabase.storage.from('references').remove([qr.reference_image_url]).catch(() => null)
-      if (qr?.preview_image_url) await supabase.storage.from('previews').remove([qr.preview_image_url]).catch(() => null)
-    }
+      if (nextStatus === 'Finalizado' && detail.quote_request_id) {
+        const { data: qr } = await withTimeout(
+          supabase.from('quote_requests').select('reference_image_url, preview_image_url').eq('id', detail.quote_request_id).maybeSingle(),
+          10000,
+          'Tiempo de espera agotado al limpiar archivos del pedido'
+        )
+        if (qr?.reference_image_url) await supabase.storage.from('references').remove([qr.reference_image_url]).catch(() => null)
+        if (qr?.preview_image_url) await supabase.storage.from('previews').remove([qr.preview_image_url]).catch(() => null)
+      }
 
-    await supabase.from('orders').update({ status: nextStatus, total_amount: numeric }).eq('id', detail.id)
-    if (detail.user_id) {
-      await supabase.from('notifications').insert({
-        user_id: detail.user_id,
-        title: `Pedido ${detail.id.slice(0, 8)}: ${nextStatus}`,
-        body: numeric != null ? `Total: ${formatMoneyARS(numeric)}` : `Estado actualizado: ${nextStatus}`,
-        link_url: detail.quote_request_id ? `/mis-pedidos/${detail.quote_request_id}` : '/mis-pedidos',
-      })
+      const { error: updateError } = await withTimeout(
+        supabase.from('orders').update({ status: nextStatus, total_amount: numeric }).eq('id', detail.id),
+        10000,
+        'Tiempo de espera agotado al actualizar el pedido'
+      )
+      if (updateError) throw updateError
+      if (detail.user_id) {
+        const title = `Pedido ${detail.id.slice(0, 8)}: ${nextStatus}`
+        const body = numeric != null ? `Total: ${formatMoneyARS(numeric)}` : `Estado actualizado: ${nextStatus}`
+        const linkUrl = detail.quote_request_id ? `/mis-pedidos/${detail.quote_request_id}` : '/mis-pedidos'
+        const { error: notifyError } = await withTimeout(
+          supabase.from('notifications').insert({
+            user_id: detail.user_id,
+            title,
+            body,
+            link_url: linkUrl,
+          }),
+          10000,
+          'Tiempo de espera agotado al notificar al cliente'
+        )
+        if (notifyError) setOpError('Pedido guardado, pero no se pudo crear la notificación.')
+        await withTimeout(
+          sendEmailNotification({
+            userId: detail.user_id ?? undefined,
+            recipientEmail: detail.quote_requests?.contact_email ?? undefined,
+            title,
+            body,
+            linkUrl,
+          }),
+          10000,
+          'Tiempo de espera agotado al enviar el email'
+        ).catch(() => setOpError('Pedido guardado, pero no se pudo enviar el email.'))
+      }
+      await load()
+      setOpenId(null)
+    } catch (e) {
+      setOpError(e instanceof Error ? e.message : 'No se pudo guardar el pedido.')
+    } finally {
+      setBusy(false)
     }
-    await load()
-    setBusy(false)
-    setOpenId(null)
   }
 
   return (
@@ -202,6 +240,9 @@ export default function AdminOrders() {
                 ))}
               </div>
             </Card>
+            {opError ? (
+              <div className="rounded-xl border border-danger/40 bg-danger/10 p-3 text-sm text-danger">{opError}</div>
+            ) : null}
             <div className="flex justify-end">
               <Button onClick={() => void save()} disabled={busy}>Guardar y notificar</Button>
             </div>
