@@ -15,7 +15,12 @@ export type EmailNotificationResult = {
 
 export async function sendEmailNotification(payload: EmailNotificationPayload): Promise<EmailNotificationResult> {
   if ((!payload.userId && !payload.recipientEmail) || !payload.title?.trim() || !payload.body?.trim()) {
-    console.warn('send-notification-email skipped: invalid payload', payload)
+    console.warn('send-notification-email skipped: invalid payload', {
+      hasUserId: Boolean(payload.userId),
+      hasRecipientEmail: Boolean(payload.recipientEmail),
+      hasTitle: Boolean(payload.title?.trim()),
+      hasBody: Boolean(payload.body?.trim()),
+    })
     return { ok: false, detail: 'invalid_payload' }
   }
 
