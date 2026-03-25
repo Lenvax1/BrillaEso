@@ -220,10 +220,11 @@ export default function MyOrderDetail() {
   }
 
   const specs = parseSpecs(q.specs_json)
+  const transferData = parseTransferReference(q.payment_reference ?? null)
 
   const depositAmount = q.quoted_price != null ? q.quoted_price / 2 : null
   const remainingAmount = q.quoted_price != null ? q.quoted_price - q.quoted_price / 2 : null
-  const transferSubmitted = q.payment_status === 'pending' || !!q.payment_submitted_at
+  const transferSubmitted = q.payment_status === 'paid' || !!q.payment_submitted_at || !!transferData.holder.trim()
 
   return (
     <div className="grid gap-6 lg:grid-cols-2 lg:items-start">
@@ -305,6 +306,11 @@ export default function MyOrderDetail() {
                       </div>
                     ) : (
                       <div className="grid gap-2">
+                        {q.payment_status === 'failed' ? (
+                          <div className="rounded-xl border border-danger/40 bg-danger/10 p-3 text-sm text-danger">
+                            Necesitamos que vuelvas a cargar los datos de la transferencia para validar el pago.
+                          </div>
+                        ) : null}
                         <div className="text-xs text-text-secondary">Transferencia realizada por</div>
                         <input
                           className="h-10 rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-text-primary"

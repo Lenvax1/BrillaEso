@@ -1,5 +1,6 @@
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.50.0'
+import { sendNotificationEmail } from '../_shared/sendNotificationEmail.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -158,6 +159,20 @@ serve(async (req) => {
     body: 'Aceptaste el presupuesto. Completá el pago para continuar.',
     link_url: `/mis-pedidos/${body.quoteRequestId}`,
   })
+  const emailResult = await sendNotificationEmail({
+    supabaseUrl,
+    serviceRoleKey: serviceKey,
+    userId: userData.user.id,
+    title: 'Presupuesto aceptado',
+    body: 'Aceptaste el presupuesto. Completá el pago para continuar.',
+    linkUrl: `/mis-pedidos/${body.quoteRequestId}`,
+  }).catch((error) => {
+    console.error('sendNotificationEmail unexpected error', error)
+    return { ok: false, detail: 'unexpected_error' }
+  })
+  if (!emailResult.ok) {
+    console.error('sendNotificationEmail failed', emailResult)
+  }
 
   return new Response(JSON.stringify({ init_point: initPoint }), {
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
@@ -12,6 +12,7 @@ import type { QuoteRequest } from '@/types'
 import { formatDateShort, formatMoneyARS } from '@/lib/format'
 import { getStatusTone } from '@/lib/status'
 import { getSignedStorageUrl } from '@/lib/storage'
+import { sendEmailNotification } from '@/lib/emailNotification'
 import { useAuthStore } from '@/stores/authStore'
 
 const QUOTE_STATUS_ALLOWED = 'Cotizado'
@@ -31,23 +32,33 @@ function ModalContent({ detail, onUpdate }: { detail: QuoteRequest | null; onUpd
   const [note, setNote] = useState<string>('')
   const [busy, setBusy] = useState(false)
   const [opError, setOpError] = useState<string | null>(null)
+  const [sendEmailOnUpdate, setSendEmailOnUpdate] = useState(true)
   const [hasOrder, setHasOrder] = useState(false)
   const [detailImg, setDetailImg] = useState<string>('')
   const [previewImgFile, setPreviewImgFile] = useState<File | null>(null)
   const [previewImgUrl, setPreviewImgUrl] = useState<string>('')
+  const prevDetailIdRef = useRef<string | null>(null)
 
   const specs = detail ? parseSpecs(detail.specs_json) : null
   const transferData = parseTransferReference(detail?.payment_reference ?? null)
+  const hasTransferData = !!transferData.holder.trim()
+  const paymentStatus = detail?.payment_status
 
   useEffect(() => {
     if (!detail) {
+      prevDetailIdRef.current = null
       setDetailImg(''); setHasOrder(false); setPrice(''); setStatus('En revisión')
       setNote(''); setPreviewImgFile(null); setPreviewImgUrl(''); setOpError(null)
       return
     }
+    if (prevDetailIdRef.current !== detail.id) {
+      setOpError(null)
+      setSendEmailOnUpdate(true)
+    }
+    prevDetailIdRef.current = detail.id
     setPrice(detail.quoted_price != null ? String(detail.quoted_price) : '')
     setStatus(detail.status ?? 'En revisión')
-    setNote(''); setPreviewImgFile(null); setPreviewImgUrl(''); setOpError(null)
+    setNote(''); setPreviewImgFile(null); setPreviewImgUrl('')
 
     if (detail.reference_image_url) {
       void getSignedStorageUrl('references', detail.reference_image_url).then(setDetailImg).catch(() => setDetailImg(''))
@@ -93,6 +104,16 @@ function ModalContent({ detail, onUpdate }: { detail: QuoteRequest | null; onUpd
         link_url: `/mis-pedidos/${detail.id}`,
       })
       if (notifyError) setOpError('Se guardó la cotización, pero no se pudo enviar la notificación.')
+      if (sendEmailOnUpdate) {
+        const emailResult = await sendEmailNotification({
+          userId: detail.user_id ?? undefined,
+          recipientEmail: detail.contact_email ?? undefined,
+          title: note.trim() ? `Actualización de solicitud ${detail.id.slice(0, 8)}` : `Solicitud ${detail.id.slice(0, 8)}: ${status}`,
+          body: note.trim() || (numeric != null ? `Presupuesto: ${formatMoneyARS(numeric)}` : `Estado actualizado: ${status}`),
+          linkUrl: `/mis-pedidos/${detail.id}`,
+        })
+        if (!emailResult.ok) setOpError('Se guardó la cotización, pero no se pudo enviar el email.')
+      }
 
       onUpdate({ ...detail, status: nextStatus, quoted_price: numeric, preview_image_url: previewUrl })
       setStatus(nextStatus)
@@ -107,24 +128,47 @@ function ModalContent({ detail, onUpdate }: { detail: QuoteRequest | null; onUpd
     if (!detail.user_id) return
     const numeric = price.trim() ? Number(price) : null
     setBusy(true)
-    await supabase.from('orders').insert({
-      user_id: detail.user_id,
-      quote_request_id: detail.id,
-      status: 'Creado',
-      total_amount: numeric,
-      image_url: detail.preview_image_url || detail.reference_image_url,
-    })
-    await supabase.from('notifications').insert({
-      user_id: detail.user_id,
-      title: `Pedido creado desde ${detail.id.slice(0, 8)}`,
-      body: numeric != null ? `Total: ${formatMoneyARS(numeric)}` : 'Tu pedido ya está en proceso.',
-      link_url: `/mis-pedidos/${detail.id}`,
-    })
-    setBusy(false)
-    setHasOrder(true)
+    setOpError(null)
+    try {
+      const { error: orderError } = await supabase.from('orders').insert({
+        user_id: detail.user_id,
+        quote_request_id: detail.id,
+        status: 'Creado',
+        total_amount: numeric,
+        image_url: detail.preview_image_url || detail.reference_image_url,
+      })
+      if (orderError) throw orderError
+
+      const { error: notifyError } = await supabase.from('notifications').insert({
+        user_id: detail.user_id,
+        title: `Pedido creado desde ${detail.id.slice(0, 8)}`,
+        body: numeric != null ? `Total: ${formatMoneyARS(numeric)}` : 'Tu pedido ya está en proceso.',
+        link_url: `/mis-pedidos/${detail.id}`,
+      })
+      if (notifyError) setOpError('Pedido creado, pero no se pudo enviar la notificación.')
+
+      const emailResult = await sendEmailNotification({
+        userId: detail.user_id,
+        recipientEmail: detail.contact_email ?? undefined,
+        title: `Pedido creado desde ${detail.id.slice(0, 8)}`,
+        body: numeric != null ? `Total: ${formatMoneyARS(numeric)}` : 'Tu pedido ya está en proceso.',
+        linkUrl: `/mis-pedidos/${detail.id}`,
+      })
+      if (!emailResult.ok) setOpError('Pedido creado, pero no se pudo enviar el email.')
+
+      setHasOrder(true)
+    } catch (e) {
+      setOpError(e instanceof Error ? e.message : 'No se pudo crear el pedido.')
+    } finally {
+      setBusy(false)
+    }
   }
 
   const markPaid = async () => {
+    if (!hasTransferData) {
+      setOpError('El cliente todavía no informó los datos de transferencia.')
+      return
+    }
     setBusy(true)
     setOpError(null)
     try {
@@ -138,9 +182,65 @@ function ModalContent({ detail, onUpdate }: { detail: QuoteRequest | null; onUpd
         link_url: `/mis-pedidos/${detail.id}`,
       })
       if (notifyError) setOpError('Pago actualizado, pero no se pudo enviar la notificación.')
+      const emailResult = await sendEmailNotification({
+        userId: detail.user_id,
+        recipientEmail: detail.contact_email ?? undefined,
+        title: `Pago verificado ${detail.id.slice(0, 8)}`,
+        body: 'Verificamos tu transferencia. Continuamos con la producción.',
+        linkUrl: `/mis-pedidos/${detail.id}`,
+      })
+      if (!emailResult.ok) setOpError('Pago actualizado, pero no se pudo enviar el email.')
+      setHasOrder(true)
       onUpdate({ ...detail, payment_status: 'paid' })
     } catch (e) {
       setOpError(e instanceof Error ? e.message : 'No se pudo marcar el pago como verificado.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const requestTransferDetailsAgain = async () => {
+    setBusy(true)
+    setOpError(null)
+    try {
+      const { error: rpcError } = await supabase.rpc('admin_request_transfer_details', { p_quote_request_id: detail.id })
+      if (rpcError) {
+        const missingRpc = rpcError.code === 'PGRST202' || rpcError.message.toLowerCase().includes('could not find')
+        if (!missingRpc) throw rpcError
+        const { error: fallbackError } = await supabase
+          .from('quote_requests')
+          .update({
+            payment_method: 'transfer',
+            payment_status: 'failed',
+            payment_reference: null,
+            payment_receipt_url: null,
+            payment_paid_at: null,
+            payment_submitted_at: null,
+            payment_verified_at: null,
+          })
+          .eq('id', detail.id)
+          .eq('customer_decision', 'accepted')
+        if (fallbackError) throw fallbackError
+      }
+
+      const { error: notifyError } = await supabase.from('notifications').insert({
+        user_id: detail.user_id,
+        title: `Necesitamos verificar tu transferencia ${detail.id.slice(0, 8)}`,
+        body: 'Revisamos tu pago y necesitamos que vuelvas a cargar los datos de la transferencia.',
+        link_url: `/mis-pedidos/${detail.id}`,
+      })
+      if (notifyError) setOpError('Se solicitó el reenvío, pero no se pudo enviar la notificación.')
+      const emailResult = await sendEmailNotification({
+        userId: detail.user_id,
+        recipientEmail: detail.contact_email ?? undefined,
+        title: `Necesitamos verificar tu transferencia ${detail.id.slice(0, 8)}`,
+        body: 'Revisamos tu pago y necesitamos que vuelvas a cargar los datos de la transferencia.',
+        linkUrl: `/mis-pedidos/${detail.id}`,
+      })
+      if (!emailResult.ok) setOpError('Se solicitó el reenvío, pero no se pudo enviar el email.')
+      onUpdate({ ...detail, payment_status: 'failed', payment_submitted_at: null, payment_verified_at: null, payment_reference: null })
+    } catch (e) {
+      setOpError(e instanceof Error ? e.message : 'No se pudo solicitar el reenvío de datos.')
     } finally {
       setBusy(false)
     }
@@ -191,16 +291,19 @@ function ModalContent({ detail, onUpdate }: { detail: QuoteRequest | null; onUpd
             <div className="mt-4 rounded-xl border border-white/10 bg-white/5 p-3">
               <div className="text-xs text-text-secondary">Pago por transferencia</div>
               <div className="mt-2 flex flex-wrap items-center gap-2">
-                <Badge tone={detail.payment_status === 'paid' ? 'green' : 'purple'}>
-                  {detail.payment_status === 'paid' ? 'Pagado' : 'Pendiente'}
+                <Badge tone={paymentStatus === 'paid' ? 'green' : paymentStatus === 'failed' ? 'danger' : 'purple'}>
+                  {paymentStatus === 'paid' ? 'Pagado' : paymentStatus === 'failed' ? 'Reenvío solicitado' : 'Pendiente'}
                 </Badge>
                 {transferData.holder ? <span className="text-sm text-text-primary">Titular: {transferData.holder}</span> : null}
                 {transferData.last4 ? <span className="text-sm text-text-secondary">Op. ****{transferData.last4}</span> : null}
               </div>
               {!transferData.holder ? <div className="mt-2 text-xs text-text-secondary">El cliente aún no informó los datos de transferencia.</div> : null}
-              <div className="mt-3">
-                <Button size="sm" onClick={() => void markPaid()} disabled={busy || detail.payment_status === 'paid'}>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Button size="sm" onClick={() => void markPaid()} disabled={busy || detail.payment_status === 'paid' || !hasTransferData}>
                   {detail.payment_status === 'paid' ? 'Pago ya verificado' : 'Marcar como pagado'}
+                </Button>
+                <Button size="sm" variant="secondary" onClick={() => void requestTransferDetailsAgain()} disabled={busy || detail.payment_status === 'paid'}>
+                  Pedir datos nuevamente
                 </Button>
               </div>
             </div>
@@ -267,11 +370,24 @@ function ModalContent({ detail, onUpdate }: { detail: QuoteRequest | null; onUpd
       </Card>
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <Link to={`/mis-pedidos/${detail.id}`} className="text-sm">Abrir como cliente</Link>
-        <div className="flex flex-col gap-2 sm:flex-row">
+        <div className="flex flex-col gap-2 sm:items-end">
+          <label className="inline-flex items-center gap-2 text-sm text-text-secondary">
+            <input
+              type="checkbox"
+              checked={sendEmailOnUpdate}
+              onChange={(e) => setSendEmailOnUpdate(e.target.checked)}
+              disabled={busy}
+            />
+            Enviar email al actualizar
+          </label>
+          <div className="flex flex-col gap-2 sm:flex-row">
           <Button variant="secondary" onClick={() => void createOrder()} disabled={busy || hasOrder}>
             {hasOrder ? 'Pedido ya creado' : 'Crear pedido'}
           </Button>
-          <Button onClick={() => void save()} disabled={busy}>Guardar y notificar</Button>
+          <Button onClick={() => void save()} disabled={busy}>
+            {sendEmailOnUpdate ? 'Guardar y notificar' : 'Guardar sin email'}
+          </Button>
+          </div>
         </div>
       </div>
     </div>

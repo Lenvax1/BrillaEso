@@ -1,92 +1,93 @@
-# React + TypeScript + Vite
+# Brilla Eso
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Aplicación web para gestión de cotizaciones y pedidos de cuadros neón, con panel de cliente y panel de administración.  
+Stack principal: React + TypeScript + Vite + Supabase.
 
-Currently, two official plugins are available:
+## Requisitos
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+- Node.js 18+
+- npm 9+
+- Proyecto de Supabase
+- Cuenta de Mercado Pago para pagos
+- Cuenta de Resend para notificaciones por email
 
-## Expanding the ESLint configuration
+## Instalación
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default tseslint.config({
-  extends: [
-    // Remove ...tseslint.configs.recommended and replace with this
-    ...tseslint.configs.recommendedTypeChecked,
-    // Alternatively, use this for stricter rules
-    ...tseslint.configs.strictTypeChecked,
-    // Optionally, add this for stylistic rules
-    ...tseslint.configs.stylisticTypeChecked,
-  ],
-  languageOptions: {
-    // other options...
-    parserOptions: {
-      project: ['./tsconfig.node.json', './tsconfig.app.json'],
-      tsconfigRootDir: import.meta.dirname,
-    },
-  },
-})
+```bash
+npm install
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+## Configuración local
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+1. Crear `.env` basado en `.env.example`.
+2. Configurar variables:
+   - `VITE_SUPABASE_URL`
+   - `VITE_SUPABASE_ANON_KEY`
+   - `VITE_ALLOWED_HOSTS`
 
-export default tseslint.config({
-  extends: [
-    // other configs...
-    // Enable lint rules for React
-    reactX.configs['recommended-typescript'],
-    // Enable lint rules for React DOM
-    reactDom.configs.recommended,
-  ],
-  languageOptions: {
-    // other options...
-    parserOptions: {
-      project: ['./tsconfig.node.json', './tsconfig.app.json'],
-      tsconfigRootDir: import.meta.dirname,
-    },
-  },
-})
+## Uso
+
+```bash
+npm run dev
 ```
 
----
+Build de producción:
 
-## Configuración de la app
+```bash
+npm run build
+```
 
-### Variables de entorno
-- Crear `.env` basado en `.env.example`
-- Completar:
-  - `VITE_SUPABASE_URL`
-  - `VITE_SUPABASE_ANON_KEY`
+Previsualizar build:
 
-### Deploy en Cloudflare
-- En Cloudflare Pages, configurar `VITE_SUPABASE_URL` y `VITE_SUPABASE_ANON_KEY` en **Settings → Environment variables**.
-- Estas variables deben existir en el entorno donde corre el build.
-- `VITE_SUPABASE_URL` debe incluir protocolo (`https://`) y dominio completo del proyecto de Supabase.
-- Luego de cambiar variables, disparar un nuevo deploy para que Vite las inyecte en el bundle final.
+```bash
+npm run preview
+```
 
-### Mercado Pago (Edge Functions)
-Para que funcione el botón **Aceptar y pagar**, se usan Edge Functions.
+## Testing y chequeos
 
-1) En Supabase Dashboard → **Project Settings** → **Edge Functions** → **Secrets**
-- `MP_ACCESS_TOKEN`: access token de Mercado Pago
+```bash
+npm run test
+npm run test:run
+npm run check
+npm run lint
+```
 
-2) Deploy de funciones
-Necesitás Supabase CLI autenticado (o `SUPABASE_ACCESS_TOKEN` configurado) y ejecutar:
+## Deploy en Cloudflare Pages
+
+- Configurar `VITE_SUPABASE_URL` y `VITE_SUPABASE_ANON_KEY` en **Settings → Environment variables**.
+- `VITE_SUPABASE_URL` debe incluir protocolo y dominio completo.
+- Después de editar variables, lanzar un nuevo deploy para regenerar el bundle.
+
+## Supabase Edge Functions
+
+### Secrets requeridos
+
+En Supabase Dashboard → **Project Settings** → **Edge Functions** → **Secrets**:
+
+- `MP_ACCESS_TOKEN`
+- `RESEND_API_KEY`
+- `MAIL_SENDER` (ej: `Brilla Eso <noreply@notificaciones.brillaeso.com.ar>`)
+- `APP_BASE_URL` (ej: `https://brillaeso.com.ar`)
+- `SUPABASE_URL`
+- `SUPABASE_ANON_KEY`
+- `SUPABASE_SERVICE_ROLE_KEY`
+
+### Deploy de funciones
 
 ```bash
 npx -y supabase link --project-ref ypdyadhdyftmudtguhuj
 npx -y supabase functions deploy mp-create-preference
 npx -y supabase functions deploy quote-reject
 npx -y supabase functions deploy mp-webhook
+npx -y supabase functions deploy send-notification-email
 ```
 
-Notas:
-- `mp-webhook` está configurada con `verify_jwt = false` porque Mercado Pago no envía JWT.
+## Migraciones SQL
+
+Aplicar migraciones pendientes en tu proyecto remoto para habilitar RPCs nuevas:
+
+```bash
+npx -y supabase db push
+```
+
+Si no usás CLI para migraciones, ejecutar manualmente en SQL Editor los archivos de `supabase/migrations/`.
