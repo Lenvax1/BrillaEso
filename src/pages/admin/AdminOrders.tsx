@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
@@ -36,7 +36,9 @@ export default function AdminOrders() {
   const [busy, setBusy] = useState(false)
   const [opError, setOpError] = useState<string | null>(null)
   const [quoteAccepted, setQuoteAccepted] = useState<boolean>(false)
+  const [sendEmailOnUpdate, setSendEmailOnUpdate] = useState(true)
   const [orderImg, setOrderImg] = useState<string>('')
+  const prevOpenIdRef = useRef<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -51,6 +53,7 @@ export default function AdminOrders() {
       })
       const response = await withTimeout(
         fetch(`${supabaseUrl}/rest/v1/orders?${params.toString()}`, {
+          cache: 'no-store',
           headers: {
             apikey: supabaseAnonKey,
             Authorization: `Bearer ${accessToken}`,
@@ -74,15 +77,19 @@ export default function AdminOrders() {
   }, [load])
 
   useEffect(() => {
-    if (!openId) { setDetail(null); setQuoteAccepted(false); setBusy(false); setOpError(null); return }
+    if (!openId) { prevOpenIdRef.current = null; setDetail(null); setQuoteAccepted(false); setBusy(false); return }
     const found = items.find((x) => x.id === openId) ?? null
+    if (prevOpenIdRef.current !== openId) {
+      setOpError(null)
+      setSendEmailOnUpdate(true)
+    }
+    prevOpenIdRef.current = openId
     setDetail(found)
     setStatus(found?.status ?? 'Creado')
     setAmount(found?.total_amount != null ? String(found.total_amount) : '')
     const decision = found?.quote_requests?.customer_decision
     const paid = found?.quote_requests?.payment_status === 'paid'
     setQuoteAccepted(decision === 'accepted' || paid)
-    setOpError(null)
 
     if (found?.image_url) {
       void getSignedStorageUrl('previews', found.image_url).then(setOrderImg).catch(() => setOrderImg(''))
@@ -103,67 +110,138 @@ export default function AdminOrders() {
     setOpError(null)
     try {
       const numeric = amount.trim() ? Number(amount) : null
-      const nextStatus = quoteAccepted ? status : 'Creado'
-
-      if (nextStatus === 'Finalizado' && detail.quote_request_id) {
-        const { data: qr } = await withTimeout(
-          supabase.from('quote_requests').select('reference_image_url, preview_image_url').eq('id', detail.quote_request_id).maybeSingle(),
-          10000,
-          'Tiempo de espera agotado al limpiar archivos del pedido'
-        )
-        if (qr?.reference_image_url) await supabase.storage.from('references').remove([qr.reference_image_url]).catch(() => null)
-        if (qr?.preview_image_url) await supabase.storage.from('previews').remove([qr.preview_image_url]).catch(() => null)
+      if (numeric !== null && !Number.isFinite(numeric)) {
+        setOpError('Introduce un total válido.')
+        return
       }
+      const nextStatus = quoteAccepted ? status : 'Creado'
+      const title = `Pedido ${detail.id.slice(0, 8)}: ${nextStatus}`
+      const body = numeric != null ? `Total: ${formatMoneyARS(numeric)}` : `Estado actualizado: ${nextStatus}`
+      const linkUrl = detail.quote_request_id ? `/mis-pedidos/${detail.quote_request_id}` : '/mis-pedidos'
+      const accessToken = useAuthStore.getState().session?.access_token
+      if (!accessToken) throw new Error('Sesión expirada. Ingresá nuevamente.')
 
-      const { error: updateError } = await withTimeout(
-        supabase.from('orders').update({ status: nextStatus, total_amount: numeric }).eq('id', detail.id),
+      const updateResponse = await withTimeout(
+        fetch(`${supabaseUrl}/rest/v1/orders?id=eq.${detail.id}`, {
+          method: 'PATCH',
+          headers: {
+            apikey: supabaseAnonKey,
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+            Prefer: 'return=minimal',
+          },
+          body: JSON.stringify({ status: nextStatus, total_amount: numeric }),
+        }),
         10000,
         'Tiempo de espera agotado al actualizar el pedido'
       )
-      if (updateError) throw updateError
-      let hasPartialError = false
-      if (detail.user_id) {
-        const title = `Pedido ${detail.id.slice(0, 8)}: ${nextStatus}`
-        const body = numeric != null ? `Total: ${formatMoneyARS(numeric)}` : `Estado actualizado: ${nextStatus}`
-        const linkUrl = detail.quote_request_id ? `/mis-pedidos/${detail.quote_request_id}` : '/mis-pedidos'
-        const { error: notifyError } = await withTimeout(
-          supabase.from('notifications').insert({
-            user_id: detail.user_id,
-            title,
-            body,
-            link_url: linkUrl,
-          }),
-          10000,
-          'Tiempo de espera agotado al notificar al cliente'
+      if (!updateResponse.ok) throw new Error(`No se pudo actualizar el pedido (${updateResponse.status}).`)
+      setItems((prev) =>
+        prev.map((item) =>
+          item.id === detail.id
+            ? { ...item, status: nextStatus, total_amount: numeric }
+            : item
         )
-        if (notifyError) {
-          hasPartialError = true
-          setOpError('Pedido guardado, pero no se pudo crear la notificación.')
+      )
+      setDetail((prev) =>
+        prev && prev.id === detail.id
+          ? { ...prev, status: nextStatus, total_amount: numeric }
+          : prev
+      )
+      setOpenId(null)
+      void (async () => {
+        try {
+          const postSaveTasks: Array<Promise<void>> = []
+          if (nextStatus === 'Finalizado' && detail.quote_request_id) {
+            postSaveTasks.push((async () => {
+              const { data: qr } = await withTimeout(
+                supabase.from('quote_requests').select('reference_image_url, preview_image_url').eq('id', detail.quote_request_id).maybeSingle(),
+                10000,
+                'Tiempo de espera agotado al limpiar archivos del pedido'
+              )
+              const cleanupReferencePath = qr?.reference_image_url ?? null
+              const cleanupPreviewPath = qr?.preview_image_url ?? null
+              if (cleanupReferencePath) {
+                const { error } = await supabase.storage.from('references').remove([cleanupReferencePath])
+                if (error) throw error
+              }
+              if (cleanupPreviewPath) {
+                const { error } = await supabase.storage.from('previews').remove([cleanupPreviewPath])
+                if (error) throw error
+              }
+            })())
+          }
+          if (detail.user_id) {
+            postSaveTasks.push((async () => {
+              const notifyResponse = await withTimeout(
+                fetch(`${supabaseUrl}/rest/v1/notifications`, {
+                  method: 'POST',
+                  headers: {
+                    apikey: supabaseAnonKey,
+                    Authorization: `Bearer ${accessToken}`,
+                    'Content-Type': 'application/json',
+                    Prefer: 'return=minimal',
+                  },
+                  body: JSON.stringify({
+                    user_id: detail.user_id,
+                    title,
+                    body,
+                    link_url: linkUrl,
+                  }),
+                }),
+                10000,
+                'Tiempo de espera agotado al crear la notificación'
+              )
+              if (!notifyResponse.ok) throw new Error(`No se pudo notificar (${notifyResponse.status}).`)
+            })())
+          }
+          let recipientEmail = detail.quote_requests?.contact_email?.trim() ?? ''
+          if (!recipientEmail && detail.quote_request_id) {
+            const { data: qrEmail } = await withTimeout(
+              supabase.from('quote_requests').select('contact_email').eq('id', detail.quote_request_id).maybeSingle(),
+              10000,
+              'Tiempo de espera agotado al buscar email del pedido'
+            )
+            recipientEmail = qrEmail?.contact_email?.trim() ?? ''
+          }
+          if (sendEmailOnUpdate) {
+            if (detail.user_id || recipientEmail) {
+              postSaveTasks.push((async () => {
+                console.info('admin-orders email attempt', {
+                  orderId: detail.id,
+                  hasUserId: Boolean(detail.user_id),
+                  hasRecipientEmail: Boolean(recipientEmail),
+                })
+                const emailResult = await sendEmailNotification({
+                  userId: detail.user_id ?? undefined,
+                  recipientEmail: recipientEmail || undefined,
+                  title,
+                  body,
+                  linkUrl,
+                })
+                console.info('admin-orders email result', emailResult)
+                if (!emailResult.ok) throw new Error(emailResult.detail ?? 'No se pudo enviar el email.')
+              })())
+            } else {
+              console.warn('admin-orders email skipped missing recipient', {
+                orderId: detail.id,
+                quoteRequestId: detail.quote_request_id,
+              })
+              setOpError('Pedido guardado, pero no se envió email porque falta usuario y email de contacto.')
+            }
+          }
+          const results = await Promise.allSettled(postSaveTasks)
+          const rejected = results.find((result) => result.status === 'rejected')
+          if (rejected && rejected.status === 'rejected') {
+            const reason = rejected.reason instanceof Error ? rejected.reason.message : 'Error desconocido'
+            setOpError(`Pedido guardado, pero hubo fallas al notificar: ${reason}`)
+          }
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : 'Error desconocido'
+          setOpError(`Pedido guardado, pero hubo fallas al notificar: ${reason}`)
         }
-        const emailResult = await withTimeout(
-          sendEmailNotification({
-            userId: detail.user_id ?? undefined,
-            recipientEmail: detail.quote_requests?.contact_email ?? undefined,
-            title,
-            body,
-            linkUrl,
-          }),
-          10000,
-          'Tiempo de espera agotado al enviar el email'
-        ).catch(() => {
-          hasPartialError = true
-          setOpError('Pedido guardado, pero no se pudo enviar el email.')
-          return { ok: false, detail: 'timeout' }
-        })
-        if (!emailResult.ok) {
-          hasPartialError = true
-          setOpError('Pedido guardado, pero no se pudo enviar el email.')
-        }
-      }
-      if (!hasPartialError) {
-        setOpenId(null)
-      }
-      await load()
+      })()
+      void load()
     } catch (e) {
       setOpError(e instanceof Error ? e.message : 'No se pudo guardar el pedido.')
     } finally {
@@ -190,6 +268,7 @@ export default function AdminOrders() {
       {loading && items.length === 0 ? <div className="h-72 animate-pulse rounded-xl border border-white/10 bg-white/5" /> : null}
       {loading && items.length > 0 ? <div className="text-xs text-text-secondary">Actualizando pedidos…</div> : null}
       {!loading && loadError ? <div className="rounded-xl border border-danger/40 bg-danger/10 p-3 text-sm text-danger">{loadError}</div> : null}
+      {!loading && !loadError && opError ? <div className="rounded-xl border border-danger/40 bg-danger/10 p-3 text-sm text-danger">{opError}</div> : null}
 
       {!loadError && (!loading || items.length > 0) ? (
         <Card className="overflow-hidden">
@@ -257,8 +336,19 @@ export default function AdminOrders() {
             {opError ? (
               <div className="rounded-xl border border-danger/40 bg-danger/10 p-3 text-sm text-danger">{opError}</div>
             ) : null}
-            <div className="flex justify-end">
-              <Button onClick={() => void save()} disabled={busy}>Guardar y notificar</Button>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <label className="inline-flex items-center gap-2 text-sm text-text-secondary">
+                <input
+                  type="checkbox"
+                  checked={sendEmailOnUpdate}
+                  onChange={(e) => setSendEmailOnUpdate(e.target.checked)}
+                  disabled={busy}
+                />
+                Enviar email al actualizar
+              </label>
+              <Button onClick={() => void save()} disabled={busy}>
+                {sendEmailOnUpdate ? 'Guardar y notificar' : 'Guardar sin email'}
+              </Button>
             </div>
           </div>
         ) : null}

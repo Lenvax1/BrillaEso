@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
@@ -32,10 +32,12 @@ function ModalContent({ detail, onUpdate }: { detail: QuoteRequest | null; onUpd
   const [note, setNote] = useState<string>('')
   const [busy, setBusy] = useState(false)
   const [opError, setOpError] = useState<string | null>(null)
+  const [sendEmailOnUpdate, setSendEmailOnUpdate] = useState(true)
   const [hasOrder, setHasOrder] = useState(false)
   const [detailImg, setDetailImg] = useState<string>('')
   const [previewImgFile, setPreviewImgFile] = useState<File | null>(null)
   const [previewImgUrl, setPreviewImgUrl] = useState<string>('')
+  const prevDetailIdRef = useRef<string | null>(null)
 
   const specs = detail ? parseSpecs(detail.specs_json) : null
   const transferData = parseTransferReference(detail?.payment_reference ?? null)
@@ -44,13 +46,19 @@ function ModalContent({ detail, onUpdate }: { detail: QuoteRequest | null; onUpd
 
   useEffect(() => {
     if (!detail) {
+      prevDetailIdRef.current = null
       setDetailImg(''); setHasOrder(false); setPrice(''); setStatus('En revisión')
       setNote(''); setPreviewImgFile(null); setPreviewImgUrl(''); setOpError(null)
       return
     }
+    if (prevDetailIdRef.current !== detail.id) {
+      setOpError(null)
+      setSendEmailOnUpdate(true)
+    }
+    prevDetailIdRef.current = detail.id
     setPrice(detail.quoted_price != null ? String(detail.quoted_price) : '')
     setStatus(detail.status ?? 'En revisión')
-    setNote(''); setPreviewImgFile(null); setPreviewImgUrl(''); setOpError(null)
+    setNote(''); setPreviewImgFile(null); setPreviewImgUrl('')
 
     if (detail.reference_image_url) {
       void getSignedStorageUrl('references', detail.reference_image_url).then(setDetailImg).catch(() => setDetailImg(''))
@@ -96,14 +104,16 @@ function ModalContent({ detail, onUpdate }: { detail: QuoteRequest | null; onUpd
         link_url: `/mis-pedidos/${detail.id}`,
       })
       if (notifyError) setOpError('Se guardó la cotización, pero no se pudo enviar la notificación.')
-      const emailResult = await sendEmailNotification({
-        userId: detail.user_id ?? undefined,
-        recipientEmail: detail.contact_email ?? undefined,
-        title: note.trim() ? `Actualización de solicitud ${detail.id.slice(0, 8)}` : `Solicitud ${detail.id.slice(0, 8)}: ${status}`,
-        body: note.trim() || (numeric != null ? `Presupuesto: ${formatMoneyARS(numeric)}` : `Estado actualizado: ${status}`),
-        linkUrl: `/mis-pedidos/${detail.id}`,
-      })
-      if (!emailResult.ok) setOpError('Se guardó la cotización, pero no se pudo enviar el email.')
+      if (sendEmailOnUpdate) {
+        const emailResult = await sendEmailNotification({
+          userId: detail.user_id ?? undefined,
+          recipientEmail: detail.contact_email ?? undefined,
+          title: note.trim() ? `Actualización de solicitud ${detail.id.slice(0, 8)}` : `Solicitud ${detail.id.slice(0, 8)}: ${status}`,
+          body: note.trim() || (numeric != null ? `Presupuesto: ${formatMoneyARS(numeric)}` : `Estado actualizado: ${status}`),
+          linkUrl: `/mis-pedidos/${detail.id}`,
+        })
+        if (!emailResult.ok) setOpError('Se guardó la cotización, pero no se pudo enviar el email.')
+      }
 
       onUpdate({ ...detail, status: nextStatus, quoted_price: numeric, preview_image_url: previewUrl })
       setStatus(nextStatus)
@@ -360,11 +370,24 @@ function ModalContent({ detail, onUpdate }: { detail: QuoteRequest | null; onUpd
       </Card>
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <Link to={`/mis-pedidos/${detail.id}`} className="text-sm">Abrir como cliente</Link>
-        <div className="flex flex-col gap-2 sm:flex-row">
+        <div className="flex flex-col gap-2 sm:items-end">
+          <label className="inline-flex items-center gap-2 text-sm text-text-secondary">
+            <input
+              type="checkbox"
+              checked={sendEmailOnUpdate}
+              onChange={(e) => setSendEmailOnUpdate(e.target.checked)}
+              disabled={busy}
+            />
+            Enviar email al actualizar
+          </label>
+          <div className="flex flex-col gap-2 sm:flex-row">
           <Button variant="secondary" onClick={() => void createOrder()} disabled={busy || hasOrder}>
             {hasOrder ? 'Pedido ya creado' : 'Crear pedido'}
           </Button>
-          <Button onClick={() => void save()} disabled={busy}>Guardar y notificar</Button>
+          <Button onClick={() => void save()} disabled={busy}>
+            {sendEmailOnUpdate ? 'Guardar y notificar' : 'Guardar sin email'}
+          </Button>
+          </div>
         </div>
       </div>
     </div>
