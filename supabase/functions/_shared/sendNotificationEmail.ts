@@ -14,6 +14,8 @@ type SendEmailResult =
   | { ok: true; warning?: string }
   | { ok: false; detail: string }
 
+const RESEND_TIMEOUT_MS = 12000
+
 function escapeHtml(value: string) {
   return value
     .replaceAll('&', '&amp;')
@@ -95,6 +97,8 @@ export async function sendNotificationEmail(args: SendEmailArgs): Promise<SendEm
   const html = `<html><body style="margin:0;padding:0;background:#f3f4f6;font-family:Inter,Segoe UI,Roboto,Arial,sans-serif;"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f3f4f6;padding:24px 12px;"><tr><td align="center"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:640px;background:#ffffff;border-radius:16px;overflow:hidden;"><tr><td style="padding:22px 32px;background:#0f172a;"><div style="font-size:12px;letter-spacing:0.08em;text-transform:uppercase;color:#93c5fd;font-weight:600;">Brilla Eso</div><h1 style="margin:8px 0 0;color:#ffffff;font-size:24px;line-height:1.3;font-weight:700;">${safeTitle}</h1></td></tr><tr><td style="padding:28px 32px 12px;">${safeBodyHtml}</td></tr>${ctaHtml}<tr><td style="padding:0 32px 28px;color:#6b7280;font-size:12px;line-height:1.6;">Este mensaje fue enviado automáticamente por Brilla Eso.</td></tr></table></td></tr></table></body></html>`
 
   let response: Response
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), RESEND_TIMEOUT_MS)
   try {
     response = await fetch('https://api.resend.com/emails', {
       method: 'POST',
@@ -102,6 +106,7 @@ export async function sendNotificationEmail(args: SendEmailArgs): Promise<SendEm
         Authorization: `Bearer ${resendApiKey}`,
         'Content-Type': 'application/json',
       },
+      signal: controller.signal,
       body: JSON.stringify({
         from: senderEmail,
         to: [recipient],
@@ -111,11 +116,17 @@ export async function sendNotificationEmail(args: SendEmailArgs): Promise<SendEm
       }),
     })
   } catch (error) {
+    clearTimeout(timeoutId)
     return {
       ok: false,
-      detail: error instanceof Error ? error.message.slice(0, 600) : 'provider_request_failed',
+      detail: error instanceof Error && error.name === 'AbortError'
+        ? 'resend_timeout'
+        : error instanceof Error
+          ? error.message.slice(0, 600)
+          : 'provider_request_failed',
     }
   }
+  clearTimeout(timeoutId)
 
   if (!response.ok) {
     const detail = await response.text().catch(() => '')
