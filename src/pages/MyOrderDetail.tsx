@@ -4,7 +4,7 @@ import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { supabase } from '@/lib/supabase'
-import type { Order, PaymentSettings, QuoteRequest } from '@/types'
+import type { Order, QuoteRequest } from '@/types'
 import { formatDateShort, formatMoneyARS } from '@/lib/format'
 import { getStatusTone } from '@/lib/status'
 import { getSignedStorageUrl } from '@/lib/storage'
@@ -19,6 +19,10 @@ type ParsedSpecs = {
   rest: Array<{ key: string; value: string }>
 }
 
+const DEFAULT_TRANSFER_HOLDER = 'Gabriel Andrés Gallo'
+const DEFAULT_TRANSFER_ALIAS = 'gabrielgallo.61'
+const DEFAULT_TRANSFER_CVU = '0000003100059636567122'
+
 export default function MyOrderDetail() {
   const { id } = useParams()
   const [loading, setLoading] = useState(true)
@@ -28,7 +32,6 @@ export default function MyOrderDetail() {
   const [previewImgUrl, setPreviewImgUrl] = useState<string>('')
   const [busy, setBusy] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
-  const [pay, setPay] = useState<PaymentSettings | null>(null)
   const [transferHolder, setTransferHolder] = useState<string>('')
   const [transferLast4, setTransferLast4] = useState<string>('')
 
@@ -103,20 +106,6 @@ export default function MyOrderDetail() {
           setPreviewImgUrl('')
         }
 
-        try {
-          const { data: ps, error: paymentSettingsError } = await withTimeout(
-            supabase.from('payment_settings').select('*').eq('id', 'default').maybeSingle(),
-            20_000,
-            'No se pudieron cargar los datos de pago a tiempo.'
-          )
-          if (paymentSettingsError) throw paymentSettingsError
-          setPay((ps as PaymentSettings) ?? null)
-        } catch {
-          setPay(null)
-          if (qr.customer_decision === 'accepted') {
-            setActionError('No se pudieron cargar los datos bancarios. Reintentá en unos minutos.')
-          }
-        }
       } catch (e) {
         const msg = e instanceof Error ? e.message : 'No encontrado'
         setError(msg)
@@ -124,7 +113,6 @@ export default function MyOrderDetail() {
         setImgUrl('')
         setTransferHolder('')
         setTransferLast4('')
-        setPay(null)
       } finally {
         setLoading(false)
       }
@@ -289,11 +277,9 @@ export default function MyOrderDetail() {
                     <div className="rounded-xl border border-white/10 bg-black/30 p-3 text-sm text-text-secondary">
                       <div className="text-xs">Datos de transferencia</div>
                       <div className="mt-2 grid gap-1">
-                        {pay?.transfer_holder ? <div>Titular: {pay.transfer_holder}</div> : null}
-                        {pay?.transfer_bank ? <div>Banco: {pay.transfer_bank}</div> : null}
-                        {pay?.transfer_alias ? <div>Alias: {pay.transfer_alias}</div> : null}
-                        {pay?.transfer_cbu ? <div>CBU: {pay.transfer_cbu}</div> : null}
-                        {pay?.transfer_cuit ? <div>CUIT: {pay.transfer_cuit}</div> : null}
+                        <div>Nombre: {DEFAULT_TRANSFER_HOLDER}</div>
+                        <div>Alias: {DEFAULT_TRANSFER_ALIAS}</div>
+                        <div>CVU: {DEFAULT_TRANSFER_CVU}</div>
                         {depositAmount != null ? (
                           <div className="text-text-primary">Monto a transferir (50%): {formatMoneyARS(depositAmount)}</div>
                         ) : null}
@@ -342,6 +328,19 @@ export default function MyOrderDetail() {
                       ? 'Aceptá para confirmar el diseño de aproximación y el presupuesto.'
                       : 'Aceptá para pagar y comenzar la producción, o rechazá si querés cambiar algo.'}
                   </div>
+                  {depositAmount != null ? (
+                    <div className="mt-3 rounded-xl border border-white/10 bg-black/30 p-3 text-sm text-text-secondary">
+                      <div className="text-xs">Datos de transferencia</div>
+                      <div className="mt-2 grid gap-1">
+                        <div>Nombre: {DEFAULT_TRANSFER_HOLDER}</div>
+                        <div>Alias: {DEFAULT_TRANSFER_ALIAS}</div>
+                        <div>CVU: {DEFAULT_TRANSFER_CVU}</div>
+                        {depositAmount != null ? (
+                          <div className="text-text-primary">Monto a transferir (50%): {formatMoneyARS(depositAmount)}</div>
+                        ) : null}
+                      </div>
+                    </div>
+                  ) : null}
                   <div className="mt-3 flex flex-wrap gap-2">
                     <Button onClick={() => void acceptQuote()} disabled={busy}>
                       {busy ? 'Aceptando…' : 'Aceptar diseño y presupuesto'}
