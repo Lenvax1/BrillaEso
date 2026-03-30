@@ -183,7 +183,7 @@ export function Navbar() {
                 ) : null}
               </button>
               {openNotifications ? (
-                <div className="absolute right-0 mt-2 w-[calc(100vw-1rem)] max-w-[22rem] overflow-hidden rounded-xl border border-white/10 bg-bg/95 shadow-xl backdrop-blur sm:w-[22rem]">
+                <div className="fixed left-2 right-2 top-16 z-50 overflow-hidden rounded-xl border border-white/10 bg-bg/95 shadow-xl backdrop-blur sm:absolute sm:left-auto sm:right-0 sm:top-auto sm:mt-2 sm:w-[22rem]">
                   <div className="flex items-center justify-between border-b border-white/10 bg-white/5 px-3 py-2">
                     <div className="text-sm font-semibold text-text-primary">Notificaciones</div>
                     <Link to="/mis-pedidos" className="text-xs" onClick={() => setOpenNotifications(false)}>
