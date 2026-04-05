@@ -1,0 +1,54 @@
+version: "2"
+type: frontend
+tech_stack:
+  - TypeScript
+  - React
+  - Tailwind CSS
+  - Supabase Edge Functions
+routes:
+  - path: /login
+    file: src/pages/Login.tsx
+    auth_required: false
+    description: User and admin login page
+  - path: /admin
+    file: src/pages/admin/AdminHome.tsx
+    auth_required: true
+    description: Admin dashboard entry protected by RequireAdmin
+  - path: /admin/pedidos
+    file: src/pages/admin/AdminOrders.tsx
+    auth_required: true
+    description: Admin page used to update order status and trigger customer notifications
+features:
+  - name: Admin Authentication
+    description: Allows an authenticated admin user to access protected admin routes before editing orders
+    files:
+      - src/App.tsx
+      - src/pages/Login.tsx
+      - src/components/routing/RequireAdmin.tsx
+    entry_route: /login
+    user_interactions:
+      - Open the login page
+      - Sign in with admin credentials
+      - Navigate to protected admin pages after successful authentication
+    api_calls: []
+    auth_required: false
+  - name: Resilient Order Email Notification
+    description: Sends customer order update emails through a Supabase Edge Function, retries after auth failures, falls back to direct HTTP invocation, and aborts hung requests with explicit timeouts
+    files:
+      - src/pages/admin/AdminOrders.tsx
+      - src/lib/emailNotification.ts
+      - supabase/functions/_shared/sendNotificationEmail.ts
+      - supabase/functions/send-notification-email/index.ts
+    entry_route: /admin/pedidos
+    user_interactions:
+      - Open the admin orders page
+      - Edit an order from the admin panel
+      - Save the order changes to trigger the customer email notification flow
+      - Receive a clear success or failure outcome instead of an indefinite pending state
+    api_calls:
+      - method: POST
+        endpoint: /functions/v1/send-notification-email
+      - method: POST
+        endpoint: https://api.resend.com/emails
+    auth_required: true
+known_limitations: []

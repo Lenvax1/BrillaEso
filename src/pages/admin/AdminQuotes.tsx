@@ -156,6 +156,13 @@ function ModalContent({ detail, onUpdate }: { detail: QuoteRequest | null; onUpd
       })
       if (!emailResult.ok) setOpError('Pedido creado, pero no se pudo enviar el email.')
 
+      await sendEmailNotification({
+        recipientEmail: 'brillaesoneon@gmail.com',
+        title: `Nuevo pedido creado (manual)`,
+        body: `Se ha creado un pedido manualmente para el usuario ${detail.contact_email || detail.user_id}.\nID de Cotización: ${detail.id}`,
+        linkUrl: `/admin/pedidos`,
+      }).catch((err) => console.error('Admin notification failed', err))
+
       setHasOrder(true)
     } catch (e) {
       setOpError(e instanceof Error ? e.message : 'No se pudo crear el pedido.')
