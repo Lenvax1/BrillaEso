@@ -137,6 +137,15 @@ serve(async (req) => {
       if (!emailResult.ok) {
         console.error('sendNotificationEmail failed', emailResult)
       }
+
+      await sendNotificationEmail({
+        supabaseUrl,
+        serviceRoleKey: serviceKey,
+        recipientEmail: 'brillaesoneon@gmail.com',
+        title: '¡Nuevo pedido pagado y creado!',
+        body: `Se ha creado automáticamente un nuevo pedido tras recibir el pago.\nID de Cotización: ${quoteRequestId}\nMonto: $${updatedQr.quoted_price}`,
+        linkUrl: '/admin/pedidos',
+      }).catch((error) => console.error('Admin notification failed', error))
     }
   } else if (payment.status === 'rejected' || payment.status === 'cancelled') {
     await admin

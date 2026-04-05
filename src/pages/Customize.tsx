@@ -8,6 +8,7 @@ import { Textarea } from '@/components/ui/Textarea'
 import { supabase } from '@/lib/supabase'
 import { withTimeout } from '@/lib/timeout'
 import { useAuthStore } from '@/stores/authStore'
+import { sendEmailNotification } from '@/lib/emailNotification'
 
 type Specs = {
   measures: { widthCm: number; heightCm: number }
@@ -31,8 +32,8 @@ export default function Customize() {
 
   const [email, setEmail] = useState('')
   const [phone, setPhone] = useState('')
-  const [widthCm, setWidthCm] = useState(60)
-  const [heightCm, setHeightCm] = useState(40)
+  const [widthCm, setWidthCm] = useState<number | ''>(60)
+  const [heightCm, setHeightCm] = useState<number | ''>(40)
   const [colors, setColors] = useState('verde, morado')
   const [background, setBackground] = useState<'transparent' | 'dark' | 'light' | 'none'>('dark')
   const [text, setText] = useState('')
@@ -58,7 +59,8 @@ export default function Customize() {
 
   const canSubmit = useMemo(() => {
     const isPhoneValid = /^\+?\d{9,}$/.test(phone)
-    return !!user && !!file && email.includes('@') && widthCm > 0 && heightCm > 0 && isPhoneValid
+    const isSizeValid = typeof widthCm === 'number' && widthCm > 0 && widthCm <= 100 && typeof heightCm === 'number' && heightCm > 0 && heightCm <= 60
+    return !!user && !!file && email.includes('@') && isSizeValid && isPhoneValid
   }, [user, file, email, widthCm, heightCm, phone])
 
   const onSubmit = async () => {
@@ -102,7 +104,7 @@ export default function Customize() {
       setStep('create')
 
       const specs: Specs = {
-        measures: { widthCm, heightCm },
+        measures: { widthCm: Number(widthCm), heightCm: Number(heightCm) },
         style: { colors, background },
         text,
         notes,
@@ -150,6 +152,13 @@ export default function Customize() {
       if (!inserted) throw createErr instanceof Error ? createErr : new Error('No se pudo crear la solicitud')
 
       setOkId(inserted.id)
+
+      await sendEmailNotification({
+        recipientEmail: 'brillaesoneon@gmail.com',
+        title: '¡Nueva solicitud de presupuesto!',
+        body: `Recibiste una nueva solicitud de presupuesto.\n\nEmail del cliente: ${email}\nTeléfono: ${phone}\nMedidas: ${widthCm}x${heightCm} cm\nColores: ${colors}\nTexto: ${text || '-'}\nNotas: ${notes || '-'}`,
+        linkUrl: '/admin/cotizaciones',
+      }).catch((err) => console.error('Admin notification failed', err))
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Error al enviar solicitud'
       const lower = msg.toLowerCase()
@@ -214,13 +223,16 @@ export default function Customize() {
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
               <div className="mb-2 text-xs text-text-secondary">Ancho (cm)</div>
-              <Input type="number" min={1} value={widthCm} onChange={(e) => setWidthCm(Number(e.target.value))} />
+              <Input type="number" min={1} max={100} value={widthCm} onChange={(e) => setWidthCm(e.target.value === '' ? '' : Number(e.target.value))} />
             </div>
             <div>
               <div className="mb-2 text-xs text-text-secondary">Alto (cm)</div>
-              <Input type="number" min={1} value={heightCm} onChange={(e) => setHeightCm(Number(e.target.value))} />
+              <Input type="number" min={1} max={60} value={heightCm} onChange={(e) => setHeightCm(e.target.value === '' ? '' : Number(e.target.value))} />
             </div>
           </div>
+          {(Number(widthCm) > 100 || Number(heightCm) > 60) ? (
+            <div className="text-xs text-danger">El tamaño máximo permitido es de 100cm de ancho y 60cm de alto.</div>
+          ) : null}
 
           <div>
             <div className="mb-2 text-xs text-text-secondary">Colores / estilo</div>
