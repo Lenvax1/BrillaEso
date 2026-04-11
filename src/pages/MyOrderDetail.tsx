@@ -10,6 +10,7 @@ import { getStatusTone } from '@/lib/status'
 import { getSignedStorageUrl } from '@/lib/storage'
 import { Spinner } from '@/components/ui/Spinner'
 import { withTimeout } from '@/lib/timeout'
+import { Seo } from '@/components/Seo'
 
 type ParsedSpecs = {
   measures?: { widthCm?: number; heightCm?: number }
@@ -184,26 +185,32 @@ export default function MyOrderDetail() {
 
   if (loading) {
     return (
-      <Card className="p-6">
-        <div className="flex items-center gap-3 text-text-secondary">
-          <Spinner />
-          Cargando…
-        </div>
-      </Card>
+      <>
+        <Seo title="Cargando pedido" description="Cargando detalle del pedido…" noIndex />
+        <Card className="p-6">
+          <div className="flex items-center gap-3 text-text-secondary">
+            <Spinner />
+            Cargando…
+          </div>
+        </Card>
+      </>
     )
   }
 
   if (error || !q) {
     return (
-      <Card className="p-6">
-        <div className="text-sm font-semibold text-text-primary">No se pudo cargar</div>
-        <div className="mt-2 text-sm text-text-secondary">{error ?? 'No encontrado'}</div>
-        <div className="mt-4">
-          <Link to="/mis-pedidos">
-            <Button variant="secondary">Volver</Button>
-          </Link>
-        </div>
-      </Card>
+      <>
+        <Seo title="Pedido no disponible" description={error ?? 'No encontrado'} noIndex />
+        <Card className="p-6">
+          <div className="text-sm font-semibold text-text-primary">No se pudo cargar</div>
+          <div className="mt-2 text-sm text-text-secondary">{error ?? 'No encontrado'}</div>
+          <div className="mt-4">
+            <Link to="/mis-pedidos">
+              <Button variant="secondary">Volver</Button>
+            </Link>
+          </div>
+        </Card>
+      </>
     )
   }
 
@@ -215,36 +222,43 @@ export default function MyOrderDetail() {
   const transferSubmitted = q.payment_status === 'paid' || !!q.payment_submitted_at || !!transferData.holder.trim()
 
   return (
-    <div className="grid gap-6 lg:grid-cols-2 lg:items-start">
-      <div className="grid gap-4">
-        {previewImgUrl ? (
+    <>
+      <Seo
+        title={`Solicitud ${q.id.slice(0, 8)}`}
+        description="Detalle de tu solicitud/pedido."
+        canonicalPath={`/mis-pedidos/${q.id}`}
+        noIndex
+      />
+      <div className="grid gap-6 lg:grid-cols-2 lg:items-start">
+        <div className="grid gap-4">
+          {previewImgUrl ? (
+            <Card className="overflow-hidden">
+              <div className="border-b border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-text-primary">
+                Diseño de aproximación
+              </div>
+              <img src={previewImgUrl} alt="Aproximación" className="w-full object-cover" />
+            </Card>
+          ) : null}
           <Card className="overflow-hidden">
             <div className="border-b border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-text-primary">
-              Diseño de aproximación
+              Imagen de referencia original
             </div>
-            <img src={previewImgUrl} alt="Aproximación" className="w-full object-cover" />
+            {imgUrl ? (
+              <img src={imgUrl} alt="Referencia" className="w-full object-cover" />
+            ) : (
+              <div className="aspect-[4/3] w-full bg-white/5" />
+            )}
           </Card>
-        ) : null}
-        <Card className="overflow-hidden">
-          <div className="border-b border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-text-primary">
-            Imagen de referencia original
-          </div>
-          {imgUrl ? (
-            <img src={imgUrl} alt="Referencia" className="w-full object-cover" />
-          ) : (
-            <div className="aspect-[4/3] w-full bg-white/5" />
-          )}
-        </Card>
-      </div>
-      <div className="grid gap-4">
-        <Card className="p-5">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <div className="text-sm font-semibold text-text-primary">Solicitud {q.id.slice(0, 8)}</div>
-              <div className="mt-1 text-sm text-text-secondary">Creada: {formatDateShort(q.created_at)}</div>
+        </div>
+        <div className="grid gap-4">
+          <Card className="p-5">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-sm font-semibold text-text-primary">Solicitud {q.id.slice(0, 8)}</div>
+                <div className="mt-1 text-sm text-text-secondary">Creada: {formatDateShort(q.created_at)}</div>
+              </div>
+              <Badge tone={getStatusTone(q.orders?.[0]?.status ?? q.status)}>{q.orders?.[0]?.status ?? q.status}</Badge>
             </div>
-            <Badge tone={getStatusTone(q.orders?.[0]?.status ?? q.status)}>{q.orders?.[0]?.status ?? q.status}</Badge>
-          </div>
           {q.quoted_price != null ? (
             <div className="mt-4 rounded-xl border border-white/10 bg-white/5 p-4">
               <div className="text-xs text-text-secondary">Presupuesto</div>
@@ -412,8 +426,9 @@ export default function MyOrderDetail() {
         <Link to="/mis-pedidos">
           <Button variant="secondary">Volver</Button>
         </Link>
+        </div>
       </div>
-    </div>
+    </>
   )
 }
 

@@ -10,6 +10,7 @@ import type { GalleryWork, GalleryWorkImage } from '@/types'
 import { getPublicStorageUrl } from '@/lib/storage'
 import { withTimeout } from '@/lib/timeout'
 import { getErrorMessage } from '@/lib/error'
+import { Seo } from '@/components/Seo'
 
 export default function WorkDetail() {
   const { id } = useParams()
@@ -80,57 +81,73 @@ export default function WorkDetail() {
   }, [work?.cover_image_url, imgs])
 
   if (loading) {
-    return <div className="h-72 animate-pulse rounded-2xl border border-white/10 bg-white/5" />
+    return (
+      <>
+        <Seo title="Cargando trabajo" description="Cargando detalle del trabajo…" noIndex />
+        <div className="h-72 animate-pulse rounded-2xl border border-white/10 bg-white/5" />
+      </>
+    )
   }
 
   if (error || !work) {
     return (
-      <Card className="p-6">
-        <div className="text-sm font-semibold text-text-primary">Trabajo no disponible</div>
-        <div className="mt-2 text-sm text-text-secondary">{error ?? 'No encontrado'}</div>
-        <div className="mt-5">
-          <Link to="/">
-            <Button variant="secondary">Volver a la galería</Button>
-          </Link>
-        </div>
-      </Card>
+      <>
+        <Seo title="Trabajo no disponible" description={error ?? 'No encontrado'} noIndex />
+        <Card className="p-6">
+          <div className="text-sm font-semibold text-text-primary">Trabajo no disponible</div>
+          <div className="mt-2 text-sm text-text-secondary">{error ?? 'No encontrado'}</div>
+          <div className="mt-5">
+            <Link to="/">
+              <Button variant="secondary">Volver a la galería</Button>
+            </Link>
+          </div>
+        </Card>
+      </>
     )
   }
 
   const tags = work.tags_json ? parseTags(work.tags_json) : []
 
   return (
-    <div className="grid gap-8 lg:grid-cols-2 lg:items-start">
-      <div>
-        <ImageCarousel images={images} alt={work.title ?? 'Trabajo'} />
-        <div className="mt-2 text-xs text-text-secondary">Tocá la foto o video para verlo en grande.</div>
+    <>
+      <Seo
+        title={work.title ?? 'Trabajo'}
+        description={work.description ?? 'Trabajo de la galería de Brilla Eso.'}
+        image={images[0]}
+        type="article"
+      />
+      <div className="grid gap-8 lg:grid-cols-2 lg:items-start">
+        <div>
+          <ImageCarousel images={images} alt={work.title ?? 'Trabajo'} />
+          <div className="mt-2 text-xs text-text-secondary">Tocá la foto o video para verlo en grande.</div>
+        </div>
+
+        <div>
+          <div className="text-2xl font-semibold text-text-primary">{work.title ?? 'Trabajo'}</div>
+          {work.description ? <div className="mt-2 text-sm text-text-secondary">{work.description}</div> : null}
+
+          {tags.length ? (
+            <div className="mt-4 flex flex-wrap gap-2">
+              {tags.map((t) => (
+                <Badge key={t}>{t}</Badge>
+              ))}
+            </div>
+          ) : null}
+
+          <Card className="mt-6 p-5">
+            <div className="text-sm font-semibold text-text-primary">¿Querés uno así?</div>
+            <div className="mt-2 text-sm text-text-secondary">Subí una referencia y te cotizamos con tus medidas y estilo.</div>
+            <div className="mt-4">
+              <Link to="/personalizar">
+                <Button>
+                  Quiero cotizar <ArrowRight className="h-4 w-4" />
+                </Button>
+              </Link>
+            </div>
+          </Card>
+        </div>
       </div>
-
-      <div>
-        <div className="text-2xl font-semibold text-text-primary">{work.title ?? 'Trabajo'}</div>
-        {work.description ? <div className="mt-2 text-sm text-text-secondary">{work.description}</div> : null}
-
-        {tags.length ? (
-          <div className="mt-4 flex flex-wrap gap-2">
-            {tags.map((t) => (
-              <Badge key={t}>{t}</Badge>
-            ))}
-          </div>
-        ) : null}
-
-        <Card className="mt-6 p-5">
-          <div className="text-sm font-semibold text-text-primary">¿Querés uno así?</div>
-          <div className="mt-2 text-sm text-text-secondary">Subí una referencia y te cotizamos con tus medidas y estilo.</div>
-          <div className="mt-4">
-            <Link to="/personalizar">
-              <Button>
-                Quiero cotizar <ArrowRight className="h-4 w-4" />
-              </Button>
-            </Link>
-          </div>
-        </Card>
-      </div>
-    </div>
+    </>
   )
 }
 

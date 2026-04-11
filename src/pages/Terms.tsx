@@ -1,13 +1,20 @@
 import { Card } from '@/components/ui/Card'
+import { Seo } from '@/components/Seo'
 
 export default function Terms() {
   return (
-    <div className="mx-auto max-w-3xl">
-      <Card className="p-6">
-        <div className="text-lg font-semibold text-text-primary">Términos y condiciones</div>
-        <div className="mt-2 text-sm text-text-secondary">
-          Estos términos regulan el uso del sitio y la contratación de productos personalizados de Brilla Eso.
-        </div>
+    <>
+      <Seo
+        title="Términos y condiciones"
+        description="Términos y condiciones de Brilla Eso para productos personalizados."
+        canonicalPath="/terminos"
+      />
+      <div className="mx-auto max-w-3xl">
+        <Card className="p-6">
+          <div className="text-lg font-semibold text-text-primary">Términos y condiciones</div>
+          <div className="mt-2 text-sm text-text-secondary">
+            Estos términos regulan el uso del sitio y la contratación de productos personalizados de Brilla Eso.
+          </div>
 
         <div className="mt-6 grid gap-5 text-sm text-text-secondary">
           <section>
@@ -58,7 +65,8 @@ export default function Terms() {
             </div>
           </section>
         </div>
-      </Card>
-    </div>
+        </Card>
+      </div>
+    </>
   )
 }

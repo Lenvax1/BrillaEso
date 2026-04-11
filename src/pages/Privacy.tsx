@@ -1,13 +1,20 @@
 import { Card } from '@/components/ui/Card'
+import { Seo } from '@/components/Seo'
 
 export default function Privacy() {
   return (
-    <div className="mx-auto max-w-3xl">
-      <Card className="p-6">
-        <div className="text-lg font-semibold text-text-primary">Política de privacidad</div>
-        <div className="mt-2 text-sm text-text-secondary">
-          Esta política describe cómo Brilla Eso recopila y utiliza información para gestionar cotizaciones, pedidos y soporte.
-        </div>
+    <>
+      <Seo
+        title="Política de privacidad"
+        description="Cómo Brilla Eso recopila y utiliza información para gestionar cotizaciones, pedidos y soporte."
+        canonicalPath="/privacidad"
+      />
+      <div className="mx-auto max-w-3xl">
+        <Card className="p-6">
+          <div className="text-lg font-semibold text-text-primary">Política de privacidad</div>
+          <div className="mt-2 text-sm text-text-secondary">
+            Esta política describe cómo Brilla Eso recopila y utiliza información para gestionar cotizaciones, pedidos y soporte.
+          </div>
 
         <div className="mt-6 grid gap-5 text-sm text-text-secondary">
           <section>
@@ -54,7 +61,8 @@ export default function Privacy() {
             </div>
           </section>
         </div>
-      </Card>
-    </div>
+        </Card>
+      </div>
+    </>
   )
 }

@@ -1,5 +1,5 @@
 declare module 'https://esm.sh/@supabase/supabase-js@2.50.0' {
-  export function createClient(...args: any[]): any
+  export function createClient(...args: unknown[]): unknown
 }
 
 declare module 'https://deno.land/std@0.224.0/http/server.ts' {

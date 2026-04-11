@@ -10,6 +10,7 @@ import { formatDateShort, formatMoneyARS } from '@/lib/format'
 import { getStatusTone } from '@/lib/status'
 import type { Notification, Order, QuoteRequest } from '@/types'
 import { useAuthStore } from '@/stores/authStore'
+import { Seo } from '@/components/Seo'
 
 type Tab = 'pedidos' | 'notificaciones'
 const supabaseUrl = getEnv('VITE_SUPABASE_URL')
@@ -123,21 +124,23 @@ export default function MyOrders() {
   }
 
   return (
-    <div className="flex flex-col gap-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <div className="text-lg font-semibold text-text-primary">Mis pedidos y notificaciones</div>
-          <div className="mt-1 text-sm text-text-secondary">Seguimiento de tus solicitudes y actualizaciones.</div>
+    <>
+      <Seo title="Mis pedidos" description="Seguimiento de tus solicitudes y notificaciones." canonicalPath="/mis-pedidos" noIndex />
+      <div className="flex flex-col gap-6">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <div className="text-lg font-semibold text-text-primary">Mis pedidos y notificaciones</div>
+            <div className="mt-1 text-sm text-text-secondary">Seguimiento de tus solicitudes y actualizaciones.</div>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="secondary" onClick={() => void load()} disabled={loading}>
+              Actualizar
+            </Button>
+            <Link to="/personalizar">
+              <Button size="sm">Nueva cotización</Button>
+            </Link>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <Button size="sm" variant="secondary" onClick={() => void load()} disabled={loading}>
-            Actualizar
-          </Button>
-          <Link to="/personalizar">
-            <Button size="sm">Nueva cotización</Button>
-          </Link>
-        </div>
-      </div>
 
       <div className="flex gap-2">
         <button
@@ -250,6 +253,7 @@ export default function MyOrders() {
           )}
         </div>
       ) : null}
-    </div>
+      </div>
+    </>
   )
 }

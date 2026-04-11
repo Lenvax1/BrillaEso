@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿import { getEnv, getEnvUrl } from '@/lib/env'
+﻿﻿import { getEnv, getEnvUrl } from '@/lib/env'
 
 export type EmailNotificationPayload = {
   userId?: string
@@ -80,20 +80,22 @@ export async function sendEmailNotification(payload: EmailNotificationPayload): 
   }
 
   if (text.trim()) {
+    let json: { ok?: boolean; detail?: unknown; error?: unknown; message?: unknown } | null = null
     try {
-      const json = JSON.parse(text) as { ok?: boolean; detail?: unknown; error?: unknown; message?: unknown }
-      if (json.ok === false) {
-        const providerDetail = typeof json.detail === 'string'
-          ? json.detail
-          : typeof json.error === 'string'
-            ? json.error
-            : typeof json.message === 'string'
-              ? json.message
-              : 'email_provider_error'
-        console.error('[email] provider error:', providerDetail)
-        return { ok: false, detail: providerDetail }
-      }
+      json = JSON.parse(text) as { ok?: boolean; detail?: unknown; error?: unknown; message?: unknown }
     } catch {
+      json = null
+    }
+    if (json?.ok === false) {
+      const providerDetail = typeof json.detail === 'string'
+        ? json.detail
+        : typeof json.error === 'string'
+          ? json.error
+          : typeof json.message === 'string'
+            ? json.message
+            : 'email_provider_error'
+      console.error('[email] provider error:', providerDetail)
+      return { ok: false, detail: providerDetail }
     }
   }
 

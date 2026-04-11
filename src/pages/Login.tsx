@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/Input'
 import { Button } from '@/components/ui/Button'
 import { useAuthStore } from '@/stores/authStore'
 import { getErrorMessage } from '@/lib/error'
+import { Seo } from '@/components/Seo'
 
 import { GoogleIcon } from '@/components/ui/GoogleIcon'
 
@@ -45,10 +46,12 @@ export default function Login() {
   }
 
   return (
-    <div className="mx-auto max-w-md">
-      <Card className="p-6">
-        <div className="text-lg font-semibold text-text-primary">Acceso</div>
-        <div className="mt-1 text-sm text-text-secondary">Inicia sesión para ver tus pedidos y notificaciones.</div>
+    <>
+      <Seo title="Acceso" description="Iniciá sesión para ver tus pedidos y notificaciones." canonicalPath="/login" noIndex />
+      <div className="mx-auto max-w-md">
+        <Card className="p-6">
+          <div className="text-lg font-semibold text-text-primary">Acceso</div>
+          <div className="mt-1 text-sm text-text-secondary">Inicia sesión para ver tus pedidos y notificaciones.</div>
 
         <div className="mt-5 grid gap-3">
           <div>
@@ -77,7 +80,8 @@ export default function Login() {
             ¿No tenés cuenta? <Link to="/registro">Creá una</Link>
           </div>
         </div>
-      </Card>
-    </div>
+        </Card>
+      </div>
+    </>
   )
 }

@@ -6,6 +6,7 @@ import { Card } from '@/components/ui/Card'
 import { GalleryCard } from '@/components/gallery/GalleryCard'
 import { withTimeout } from '@/lib/timeout'
 import { getEnv } from '@/lib/env'
+import { Seo } from '@/components/Seo'
 import type { GalleryWork } from '@/types'
 
 const supabaseUrl = getEnv('VITE_SUPABASE_URL')
@@ -54,83 +55,96 @@ export default function Home() {
   }
 
   return (
-    <div className="flex flex-col gap-10">
-      <section className="grid gap-6 rounded-2xl border border-white/10 bg-gradient-to-b from-white/5 to-transparent p-6 md:grid-cols-2 md:items-center md:p-10">
-        <div>
-          <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-text-secondary">
-            <Sparkles className="h-4 w-4 text-neon-purple" />
-            Cuadros neón 100% personalizados
-          </div>
-          <h1 className="mt-4 text-3xl font-semibold leading-tight text-text-primary md:text-4xl">
-            Mirá trabajos reales y pedí tu cotización subiendo una referencia
-          </h1>
-          <p className="mt-3 max-w-xl text-sm text-text-secondary">
-            Subí una imagen, definí medidas y estilo, y seguí el estado desde tu cuenta. Notificaciones in-app y por email.
-          </p>
-          <div className="mt-6 flex flex-col gap-3 sm:flex-row">
-            <Link to="/personalizar" className="w-full sm:w-auto">
-              <Button className="w-full sm:w-auto">Personalizar y cotizar <ArrowRight className="h-4 w-4" /></Button>
-            </Link>
-            <Button className="w-full sm:w-auto" variant="secondary" onClick={scrollToGallery}>Ver galería</Button>
-          </div>
-        </div>
-        <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
-          <img
-            src="https://brillaeso.com.ar/images/Logotipo16-9.jpeg"
-            alt="Mockup"
-            className="aspect-video w-full rounded-xl object-cover"
-            loading="lazy"
-          />
-        </div>
-      </section>
-
-      <section className="grid gap-4 md:grid-cols-3">
-        <Card className="p-5">
-          <div className="text-sm font-semibold text-text-primary">1) Subí referencia</div>
-          <div className="mt-2 text-sm text-text-secondary">JPG/PNG con preview y validación.</div>
-        </Card>
-        <Card className="p-5">
-          <div className="text-sm font-semibold text-text-primary">2) Recibí presupuesto</div>
-          <div className="mt-2 text-sm text-text-secondary">Notificación cuando el admin cotiza tu pedido.</div>
-        </Card>
-        <Card className="p-5">
-          <div className="text-sm font-semibold text-text-primary">3) Producción y entrega</div>
-          <div className="mt-2 text-sm text-text-secondary">Seguimiento por estados desde "Mis pedidos".</div>
-        </Card>
-      </section>
-
-      <section id="galeria">
-        <div className="flex items-end justify-between gap-4">
+    <>
+      <Seo
+        title="Cuadros neón personalizados"
+        description="Cuadros neón 100% personalizados. Mirá trabajos reales y pedí tu cotización subiendo una referencia."
+        image="/images/Logotipo16-9.jpeg"
+        structuredData={{
+          '@context': 'https://schema.org',
+          '@type': 'WebSite',
+          name: 'Brilla Eso',
+          url: ((import.meta.env.VITE_SITE_URL as string | undefined)?.trim() || 'https://brillaeso.com.ar').replace(/\/$/, ''),
+        }}
+      />
+      <div className="flex flex-col gap-10">
+        <section className="grid gap-6 rounded-2xl border border-white/10 bg-gradient-to-b from-white/5 to-transparent p-6 md:grid-cols-2 md:items-center md:p-10">
           <div>
-            <div className="text-sm font-semibold text-text-primary">Galería de trabajos</div>
-            <div className="mt-1 text-sm text-text-secondary">Inspirate con trabajos reales.</div>
+            <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-text-secondary">
+              <Sparkles className="h-4 w-4 text-neon-purple" />
+              Cuadros neón 100% personalizados
+            </div>
+            <h1 className="mt-4 text-3xl font-semibold leading-tight text-text-primary md:text-4xl">
+              Mirá trabajos reales y pedí tu cotización subiendo una referencia
+            </h1>
+            <p className="mt-3 max-w-xl text-sm text-text-secondary">
+              Subí una imagen, definí medidas y estilo, y seguí el estado desde tu cuenta. Notificaciones in-app y por email.
+            </p>
+            <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+              <Link to="/personalizar" className="w-full sm:w-auto">
+                <Button className="w-full sm:w-auto">Personalizar y cotizar <ArrowRight className="h-4 w-4" /></Button>
+              </Link>
+              <Button className="w-full sm:w-auto" variant="secondary" onClick={scrollToGallery}>Ver galería</Button>
+            </div>
           </div>
-          <Link to="/personalizar" className="hidden sm:block">
-            <Button variant="secondary" size="sm">Cotizá el tuyo</Button>
-          </Link>
-        </div>
-        {loading ? (
-          <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {Array.from({ length: 6 }).map((_, i) => (
-              <div key={i} className="h-60 animate-pulse rounded-xl border border-white/10 bg-white/5" />
-            ))}
+          <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
+            <img
+              src="https://brillaeso.com.ar/images/Logotipo16-9.jpeg"
+              alt="Mockup"
+              className="aspect-video w-full rounded-xl object-cover"
+              loading="lazy"
+            />
           </div>
-        ) : error ? (
-          <div className="mt-6 rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-text-secondary">
-            No se pudo cargar la galería: {error}
+        </section>
+
+        <section className="grid gap-4 md:grid-cols-3">
+          <Card className="p-5">
+            <div className="text-sm font-semibold text-text-primary">1) Subí referencia</div>
+            <div className="mt-2 text-sm text-text-secondary">JPG/PNG con preview y validación.</div>
+          </Card>
+          <Card className="p-5">
+            <div className="text-sm font-semibold text-text-primary">2) Recibí presupuesto</div>
+            <div className="mt-2 text-sm text-text-secondary">Notificación cuando el admin cotiza tu pedido.</div>
+          </Card>
+          <Card className="p-5">
+            <div className="text-sm font-semibold text-text-primary">3) Producción y entrega</div>
+            <div className="mt-2 text-sm text-text-secondary">Seguimiento por estados desde "Mis pedidos".</div>
+          </Card>
+        </section>
+
+        <section id="galeria">
+          <div className="flex items-end justify-between gap-4">
+            <div>
+              <div className="text-sm font-semibold text-text-primary">Galería de trabajos</div>
+              <div className="mt-1 text-sm text-text-secondary">Inspirate con trabajos reales.</div>
+            </div>
+            <Link to="/personalizar" className="hidden sm:block">
+              <Button variant="secondary" size="sm">Cotizá el tuyo</Button>
+            </Link>
           </div>
-        ) : works.length === 0 ? (
-          <div className="mt-6 rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-text-secondary">
-            Todavía no hay trabajos publicados.
-          </div>
-        ) : (
-          <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {works.map((w) => (
-              <GalleryCard key={w.id} work={w} />
-            ))}
-          </div>
-        )}
-      </section>
-    </div>
+          {loading ? (
+            <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div key={i} className="h-60 animate-pulse rounded-xl border border-white/10 bg-white/5" />
+              ))}
+            </div>
+          ) : error ? (
+            <div className="mt-6 rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-text-secondary">
+              No se pudo cargar la galería: {error}
+            </div>
+          ) : works.length === 0 ? (
+            <div className="mt-6 rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-text-secondary">
+              Todavía no hay trabajos publicados.
+            </div>
+          ) : (
+            <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {works.map((w) => (
+                <GalleryCard key={w.id} work={w} />
+              ))}
+            </div>
+          )}
+        </section>
+      </div>
+    </>
   )
 }

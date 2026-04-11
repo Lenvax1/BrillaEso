@@ -1,0 +1,10 @@
+User-agent: *
+Allow: /
+Disallow: /admin
+Disallow: /login
+Disallow: /registro
+Disallow: /mis-pedidos
+Disallow: /pago
+
+Sitemap: https://brillaeso.com.ar/sitemap.xml
+

@@ -9,6 +9,7 @@ import { supabase } from '@/lib/supabase'
 import { withTimeout } from '@/lib/timeout'
 import { useAuthStore } from '@/stores/authStore'
 import { sendEmailNotification } from '@/lib/emailNotification'
+import { Seo } from '@/components/Seo'
 
 type Specs = {
   measures: { widthCm: number; heightCm: number }
@@ -174,8 +175,15 @@ export default function Customize() {
   }
 
   return (
-    <div className="grid gap-6 lg:grid-cols-2 lg:items-start">
-      <Card className="p-5">
+    <>
+      <Seo
+        title="Personalizar y cotizar"
+        description="Subí una imagen de referencia, definí medidas y estilo, y te enviamos una cotización personalizada."
+        image="/images/Logotipo16-9.jpeg"
+        canonicalPath="/personalizar"
+      />
+      <div className="grid gap-6 lg:grid-cols-2 lg:items-start">
+        <Card className="p-5">
         <div className="text-sm font-semibold text-text-primary">Subí tu imagen de referencia</div>
         <div className="mt-1 text-sm text-text-secondary">Formatos: JPG/PNG. Te recomendamos buena iluminación.</div>
 
@@ -215,7 +223,7 @@ export default function Customize() {
         ) : null}
       </Card>
 
-      <Card className="p-5">
+        <Card className="p-5">
         <div className="text-sm font-semibold text-text-primary">Detalles para cotizar</div>
         <div className="mt-1 text-sm text-text-secondary">Completá medidas, estilo y contacto.</div>
 
@@ -317,7 +325,8 @@ export default function Customize() {
 
         </div>
       </Card>
-    </div>
+      </div>
+    </>
   )
 }
 
